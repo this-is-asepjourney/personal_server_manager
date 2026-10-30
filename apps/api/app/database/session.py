@@ -3,13 +3,22 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from apps.api.app.core.config import settings
 
+db_url = settings.DATABASE_URL
+if db_url.startswith("postgresql+psycopg://"):
+    try:
+        import psycopg  # type: ignore # noqa: F401
+    except ImportError:
+        db_url = db_url.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+elif db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql+psycopg2://", 1)
+
 # Configure engine. For SQLite, need check_same_thread=False
 connect_args = {}
-if settings.DATABASE_URL.startswith("sqlite"):
+if db_url.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
 
 engine = create_engine(
-    settings.DATABASE_URL,
+    db_url,
     connect_args=connect_args,
     pool_pre_ping=True
 )
@@ -24,4 +33,3 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
-
