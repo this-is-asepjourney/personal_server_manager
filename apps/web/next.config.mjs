@@ -2,15 +2,22 @@
 const nextConfig = {
   reactStrictMode: true,
   async rewrites() {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const apiUrl = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
     return [
       {
         source: '/api/v1/:path*',
         destination: `${apiUrl}/api/v1/:path*`,
+      },
+      {
+        source: '/health',
+        destination: `${apiUrl}/health`,
+      },
+      {
+        source: '/install-agent.sh',
+        destination: `${apiUrl}/install-agent.sh`,
       },
     ];
   },
 };
 
 export default nextConfig;
-

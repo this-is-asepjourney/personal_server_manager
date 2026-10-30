@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -9,12 +9,8 @@ import {
   Key,
   Settings,
   RefreshCw,
-  GitBranch,
   ArrowLeft,
-  RotateCcw,
   Plus,
-  Trash2,
-  Check,
   Upload,
 } from 'lucide-react';
 import { api } from '../../../lib/api';
@@ -30,6 +26,7 @@ export default function ProjectDetailPage() {
   const [activeTab, setActiveTab] = useState<'overview' | 'deployments' | 'environment' | 'settings'>('deployments');
   const [loading, setLoading] = useState(true);
   const [deploying, setDeploying] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // New env var form
   const [newKey, setNewKey] = useState('');
@@ -64,6 +61,19 @@ export default function ProjectDetailPage() {
       router.push(`/deployments/${dep.id}`);
     } catch (err: any) {
       alert(err.message || 'Deployment trigger failed');
+      setDeploying(false);
+    }
+  };
+
+  const handleZipUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setDeploying(true);
+      const dep = await api.uploadZipDeployment(projectId, file);
+      router.push(`/deployments/${dep.id}`);
+    } catch (err: any) {
+      alert(err.message || 'ZIP upload deployment failed');
       setDeploying(false);
     }
   };
@@ -120,14 +130,31 @@ export default function ProjectDetailPage() {
           </div>
         </div>
 
-        <button
-          onClick={handleTriggerDeploy}
-          disabled={deploying}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium shadow-md shadow-blue-600/20 transition-all disabled:opacity-50"
-        >
-          <Rocket className="w-4 h-4" />
-          <span>{deploying ? 'Deploying...' : 'Deploy Latest'}</span>
-        </button>
+        <div className="flex items-center gap-2.5">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".zip"
+            onChange={handleZipUpload}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={deploying}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-border hover:bg-card text-foreground text-xs font-medium transition-all disabled:opacity-50"
+          >
+            <Upload className="w-3.5 h-3.5 text-purple-500" />
+            <span>Deploy ZIP</span>
+          </button>
+          <button
+            onClick={handleTriggerDeploy}
+            disabled={deploying}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium shadow-md shadow-blue-600/20 transition-all disabled:opacity-50"
+          >
+            <Rocket className="w-4 h-4" />
+            <span>{deploying ? 'Deploying...' : 'Deploy Latest'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Tabs Header */}
@@ -182,7 +209,7 @@ export default function ProjectDetailPage() {
                   {deployments.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="p-8 text-center text-gray-500">
-                        No deployments yet. Click &quot;Deploy Latest&quot; to build release v1.
+                        No deployments yet. Click &quot;Deploy Latest&quot; or &quot;Deploy ZIP&quot; to build release v1.
                       </td>
                     </tr>
                   ) : (
@@ -334,4 +361,3 @@ export default function ProjectDetailPage() {
     </div>
   );
 }
-

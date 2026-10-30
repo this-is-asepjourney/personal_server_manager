@@ -1,7 +1,26 @@
 import { formatBytes, formatDuration } from './utils';
 export { formatBytes, formatDuration };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export function getApiBase(): string {
+  if (process.env.NEXT_PUBLIC_API_URL && process.env.NEXT_PUBLIC_API_URL.trim() !== '') {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:8000`;
+  }
+  return process.env.INTERNAL_API_URL || 'http://localhost:8000';
+}
+
+export function getWsBase(): string {
+  if (process.env.NEXT_PUBLIC_WS_URL && process.env.NEXT_PUBLIC_WS_URL.trim() !== '') {
+    return process.env.NEXT_PUBLIC_WS_URL;
+  }
+  if (typeof window !== 'undefined') {
+    const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${wsProto}//${window.location.hostname}:8000`;
+  }
+  return 'ws://localhost:8000';
+}
 
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -32,7 +51,8 @@ export async function fetchWithAuth(endpoint: string, options: RequestInit = {})
     headers.set('Content-Type', 'application/json');
   }
 
-  const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
+  const baseUrl = getApiBase();
+  const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
   const response = await fetch(url, { ...options, headers });
 
   if (response.status === 401 && typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
@@ -46,7 +66,8 @@ export async function fetchWithAuth(endpoint: string, options: RequestInit = {})
 export const api = {
   // Auth
   async login(email: string, password: string) {
-    const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
+    const baseUrl = getApiBase();
+    const res = await fetch(`${baseUrl}/api/v1/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
@@ -69,6 +90,16 @@ export const api = {
     return res.json();
   },
 
+  async changePassword(currentPassword: string, newPassword: string) {
+    const res = await fetchWithAuth('/api/v1/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Password change failed');
+    return data;
+  },
+
   async logout() {
     try {
       await fetchWithAuth('/api/v1/auth/logout', { method: 'POST' });
@@ -77,6 +108,39 @@ export const api = {
     if (typeof window !== 'undefined') {
       window.location.href = '/login';
     }
+  },
+
+  // Users
+  async getUsers() {
+    const res = await fetchWithAuth('/api/v1/users');
+    return res.ok ? res.json() : [];
+  },
+
+  async createUser(data: { name: string; email: string; password: string; role: string }) {
+    const res = await fetchWithAuth('/api/v1/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to create user');
+    }
+    return res.json();
+  },
+
+  async updateUser(id: string, data: any) {
+    const res = await fetchWithAuth(`/api/v1/users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to update user');
+    return res.json();
+  },
+
+  async deleteUser(id: string) {
+    const res = await fetchWithAuth(`/api/v1/users/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete user');
+    return res.json();
   },
 
   // Servers
@@ -101,6 +165,15 @@ export const api = {
     return res.json();
   },
 
+  async updateServer(id: string, data: { name?: string; hostname?: string; description?: string; status?: string }) {
+    const res = await fetchWithAuth(`/api/v1/servers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to update server');
+    return res.json();
+  },
+
   async deleteServer(id: string) {
     const res = await fetchWithAuth(`/api/v1/servers/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error('Failed to delete server');
@@ -118,6 +191,18 @@ export const api = {
     return res.json();
   },
 
+  async revokeAgent(id: string) {
+    const res = await fetchWithAuth(`/api/v1/servers/${id}/agent/revoke`, { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to revoke agent credentials');
+    return res.json();
+  },
+
+  async rotateAgentToken(id: string) {
+    const res = await fetchWithAuth(`/api/v1/servers/${id}/agent/rotate`, { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to rotate agent credentials');
+    return res.json();
+  },
+
   // Containers
   async getContainers(serverId: string) {
     const res = await fetchWithAuth(`/api/v1/servers/${serverId}/containers`);
@@ -127,8 +212,15 @@ export const api = {
 
   async containerAction(serverId: string, cid: string, action: 'start' | 'stop' | 'restart' | 'remove') {
     const method = action === 'remove' ? 'DELETE' : 'POST';
-    const res = await fetchWithAuth(`/api/v1/servers/${serverId}/containers/${cid}/${action}`, { method });
+    const path = action === 'remove' ? `/api/v1/servers/${serverId}/containers/${cid}` : `/api/v1/servers/${serverId}/containers/${cid}/${action}`;
+    const res = await fetchWithAuth(path, { method });
     if (!res.ok) throw new Error(`Failed to ${action} container`);
+    return res.json();
+  },
+
+  async getContainerLogs(serverId: string, cid: string, tail = 100) {
+    const res = await fetchWithAuth(`/api/v1/servers/${serverId}/containers/${cid}/logs?tail=${tail}`);
+    if (!res.ok) return { logs: 'Unable to fetch logs.' };
     return res.json();
   },
 
@@ -223,6 +315,12 @@ export const api = {
     return res.ok ? res.json() : [];
   },
 
+  async cancelDeployment(id: string) {
+    const res = await fetchWithAuth(`/api/v1/deployments/${id}/cancel`, { method: 'POST' });
+    if (!res.ok) throw new Error('Cancel failed');
+    return res.json();
+  },
+
   async rollbackDeployment(id: string) {
     const res = await fetchWithAuth(`/api/v1/deployments/${id}/rollback`, { method: 'POST' });
     if (!res.ok) throw new Error('Rollback failed');
@@ -239,6 +337,33 @@ export const api = {
     const qs = serverId ? `?server_id=${serverId}` : '';
     const res = await fetchWithAuth(`/api/v1/monitoring/history${qs}`);
     return res.ok ? res.json() : [];
+  },
+
+  // Backups
+  async getBackups() {
+    const res = await fetchWithAuth('/api/v1/backups');
+    return res.ok ? res.json() : [];
+  },
+
+  async createBackup(data: { name: string; backup_type: string; target_id?: string }) {
+    const res = await fetchWithAuth('/api/v1/backups', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to create backup');
+    return res.json();
+  },
+
+  async restoreBackup(id: string) {
+    const res = await fetchWithAuth(`/api/v1/backups/${id}/restore`, { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to restore backup');
+    return res.json();
+  },
+
+  async deleteBackup(id: string) {
+    const res = await fetchWithAuth(`/api/v1/backups/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete backup');
+    return res.json();
   },
 
   // Audit Logs

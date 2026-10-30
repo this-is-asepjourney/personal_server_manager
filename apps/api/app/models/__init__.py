@@ -14,6 +14,9 @@ from apps.api.app.models.entities import (
     Container,
     Volume,
     DockerNetwork,
+    DockerImage,
+    Backup,
+    Notification,
     ServerMetric,
     AuditLog,
 )
@@ -34,7 +37,9 @@ __all__ = [
     "Container",
     "Volume",
     "DockerNetwork",
+    "DockerImage",
+    "Backup",
+    "Notification",
     "ServerMetric",
     "AuditLog",
 ]
-

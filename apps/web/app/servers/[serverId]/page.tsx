@@ -18,8 +18,11 @@ import {
   Activity,
   ArrowLeft,
   Terminal,
+  Key,
+  ShieldAlert,
+  X,
 } from 'lucide-react';
-import { api, formatBytes } from '../../../lib/api';
+import { api } from '../../../lib/api';
 
 export default function ServerDetailPage() {
   const params = useParams();
@@ -35,6 +38,19 @@ export default function ServerDetailPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
+  // Container logs modal state
+  const [logsModal, setLogsModal] = useState<{ open: boolean; name: string; logs: string[] }>({
+    open: false,
+    name: '',
+    logs: [],
+  });
+
+  // Settings form state
+  const [editName, setEditName] = useState('');
+  const [editHostname, setEditHostname] = useState('');
+  const [rotatedToken, setRotatedToken] = useState<string | null>(null);
+  const [settingsMsg, setSettingsMsg] = useState<string | null>(null);
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -46,6 +62,8 @@ export default function ServerDetailPage() {
         api.getNetworks(serverId),
       ]);
       setServer(s);
+      setEditName(s.name || '');
+      setEditHostname(s.hostname || '');
       setContainers(c);
       setImages(img);
       setVolumes(vol);
@@ -66,11 +84,25 @@ export default function ServerDetailPage() {
     try {
       setActionLoading(`${cid}-${action}`);
       await api.containerAction(serverId, cid, action);
-      setTimeout(loadData, 1000);
+      setTimeout(loadData, 800);
     } catch (err: any) {
       alert(err.message || `Failed to ${action} container`);
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  const handleViewLogs = async (cid: string, name: string) => {
+    try {
+      const res = await api.getContainerLogs(serverId, cid);
+      const lines = Array.isArray(res.logs)
+        ? res.logs
+        : typeof res.logs === 'string'
+        ? res.logs.split('\n')
+        : ['No log output available.'];
+      setLogsModal({ open: true, name, logs: lines });
+    } catch (err: any) {
+      alert(err.message || 'Failed to fetch container logs');
     }
   };
 
@@ -80,6 +112,38 @@ export default function ServerDetailPage() {
       alert('Ping dispatched to agent.');
     } catch (err: any) {
       alert(err.message || 'Failed to dispatch reconnect ping');
+    }
+  };
+
+  const handleSaveServerSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await api.updateServer(serverId, { name: editName, hostname: editHostname });
+      setSettingsMsg('Server configuration updated successfully.');
+      loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to update server');
+    }
+  };
+
+  const handleRotateToken = async () => {
+    if (!confirm('Rotate agent token? Existing agent tokens for this node will be revoked.')) return;
+    try {
+      const res = await api.rotateAgentToken(serverId);
+      setRotatedToken(res.agent_token);
+    } catch (err: any) {
+      alert(err.message || 'Failed to rotate token');
+    }
+  };
+
+  const handleRevokeAgent = async () => {
+    if (!confirm('Revoke all agent credentials and mark server offline?')) return;
+    try {
+      await api.revokeAgent(serverId);
+      loadData();
+      alert('Agent credentials revoked.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to revoke agent');
     }
   };
 
@@ -288,9 +352,17 @@ export default function ServerDetailPage() {
                       </td>
                       <td className="p-3.5 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleViewLogs(c.docker_id || c.id, c.name)}
+                            className="p-1.5 rounded hover:bg-gray-500/10 text-gray-400 hover:text-foreground"
+                            title="View Logs"
+                          >
+                            <Terminal className="w-3.5 h-3.5" />
+                          </button>
                           {running ? (
                             <button
                               onClick={() => handleContainerAction(c.docker_id || c.id, 'stop')}
+                              disabled={actionLoading === `${c.docker_id || c.id}-stop`}
                               className="p-1.5 rounded hover:bg-amber-500/10 text-amber-500"
                               title="Stop"
                             >
@@ -299,6 +371,7 @@ export default function ServerDetailPage() {
                           ) : (
                             <button
                               onClick={() => handleContainerAction(c.docker_id || c.id, 'start')}
+                              disabled={actionLoading === `${c.docker_id || c.id}-start`}
                               className="p-1.5 rounded hover:bg-emerald-500/10 text-emerald-500"
                               title="Start"
                             >
@@ -307,6 +380,7 @@ export default function ServerDetailPage() {
                           )}
                           <button
                             onClick={() => handleContainerAction(c.docker_id || c.id, 'restart')}
+                            disabled={actionLoading === `${c.docker_id || c.id}-restart`}
                             className="p-1.5 rounded hover:bg-blue-500/10 text-blue-500"
                             title="Restart"
                           >
@@ -314,6 +388,7 @@ export default function ServerDetailPage() {
                           </button>
                           <button
                             onClick={() => handleContainerAction(c.docker_id || c.id, 'remove')}
+                            disabled={actionLoading === `${c.docker_id || c.id}-remove`}
                             className="p-1.5 rounded hover:bg-rose-500/10 text-rose-500"
                             title="Remove"
                           >
@@ -393,25 +468,105 @@ export default function ServerDetailPage() {
 
       {/* Tab: Settings */}
       {activeTab === 'settings' && (
-        <div className="rounded-xl border border-border bg-card p-5 space-y-6">
-          <h3 className="font-bold text-sm text-foreground">Server Configuration</h3>
-          <div className="space-y-4 max-w-md">
-            <div>
-              <label className="block text-xs font-medium text-gray-400 mb-1">Node Identifier</label>
-              <input
-                type="text"
-                disabled
-                value={server.id}
-                className="w-full px-3 py-2 rounded-lg bg-background border border-border text-xs font-mono text-gray-400"
-              />
+        <div className="space-y-6">
+          <form onSubmit={handleSaveServerSettings} className="rounded-xl border border-border bg-card p-5 space-y-4">
+            <h3 className="font-bold text-sm text-foreground">Server Configuration</h3>
+            {settingsMsg && (
+              <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs">
+                {settingsMsg}
+              </div>
+            )}
+            <div className="space-y-4 max-w-md">
+              <div>
+                <label className="block text-xs font-medium text-gray-400 mb-1">Node Identifier</label>
+                <input
+                  type="text"
+                  disabled
+                  value={server?.id || ''}
+                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-xs font-mono text-gray-400"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-400 mb-1">Server Name</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-400 mb-1">Hostname / IP</label>
+                <input
+                  type="text"
+                  value={editHostname}
+                  onChange={(e) => setEditHostname(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm font-mono text-foreground"
+                />
+              </div>
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium"
+              >
+                Save Changes
+              </button>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-400 mb-1">Server Name</label>
-              <input
-                type="text"
-                defaultValue={server.name}
-                className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm text-foreground"
-              />
+          </form>
+
+          {/* Agent Credentials Management */}
+          <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+            <h3 className="font-bold text-sm text-foreground">Agent Security & Credentials</h3>
+            <p className="text-xs text-gray-500">
+              Rotate or revoke the authentication token used by the Server Agent on this node.
+            </p>
+            {rotatedToken && (
+              <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs font-mono space-y-1">
+                <div className="text-amber-500 font-semibold">New Agent Token (save now, shown once):</div>
+                <div className="text-foreground break-all select-all">{rotatedToken}</div>
+              </div>
+            )}
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={handleRotateToken}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-border hover:bg-background text-xs font-medium text-amber-500"
+              >
+                <Key className="w-3.5 h-3.5" />
+                <span>Rotate Agent Token</span>
+              </button>
+              <button
+                onClick={handleRevokeAgent}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-rose-500/30 hover:bg-rose-500/10 text-xs font-medium text-rose-500"
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>Revoke Agent Credentials</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Container Logs Modal */}
+      {logsModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-2xl rounded-xl border border-slate-800 bg-slate-950 shadow-2xl overflow-hidden font-mono text-xs">
+            <div className="flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-800">
+              <div className="flex items-center gap-2 text-slate-200 font-semibold">
+                <Terminal className="w-4 h-4 text-blue-400" />
+                <span>Container Logs: {logsModal.name}</span>
+              </div>
+              <button
+                onClick={() => setLogsModal({ open: false, name: '', logs: [] })}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 max-h-96 overflow-y-auto space-y-1 text-slate-300">
+              {logsModal.logs.map((line, i) => (
+                <div key={i} className="py-0.5 border-b border-slate-900/60 break-all">
+                  {line}
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -419,4 +574,3 @@ export default function ServerDetailPage() {
     </div>
   );
 }
-

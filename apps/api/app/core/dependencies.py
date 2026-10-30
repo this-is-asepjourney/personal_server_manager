@@ -14,6 +14,14 @@ def get_client_ip(request: Request) -> str:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
+def resolve_server(db: Session, server_id: str) -> Optional[Server]:
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server and server_id in ("homelab-primary", "default-server"):
+        server = db.query(Server).filter(Server.name == "Homelab-Primary").first()
+        if not server:
+            server = db.query(Server).order_by(Server.created_at.asc()).first()
+    return server
+
 def get_current_user(
     auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db)
@@ -61,7 +69,7 @@ def get_current_agent(
             detail="Agent authentication required (X-Agent-Token & X-Server-Id)"
         )
     hashed = hash_token(x_agent_token)
-    server = db.query(Server).filter(Server.id == x_server_id).first()
+    server = resolve_server(db, x_server_id)
     if not server:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
         
@@ -71,7 +79,7 @@ def get_current_agent(
         token_valid = True
     else:
         db_token = db.query(AgentToken).filter(
-            AgentToken.server_id == x_server_id,
+            AgentToken.server_id == server.id,
             AgentToken.token_hash == hashed
         ).first()
         if db_token:
@@ -83,4 +91,3 @@ def get_current_agent(
             detail="Invalid or revoked agent credentials"
         )
     return server
-

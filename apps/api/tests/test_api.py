@@ -88,6 +88,43 @@ def test_create_server_and_agent_register(client):
     )
     assert met_res.status_code == 200
 
+    # 5. Inventory sync
+    inv_res = client.post(
+        "/api/v1/agents/inventory",
+        json={
+            "server_id": server_id,
+            "containers": [
+                {"docker_id": "abc123def456", "name": "test-nginx", "image": "nginx:alpine", "status": "running", "ports": []}
+            ],
+            "images": [
+                {"id": "img123456789", "repository": "nginx", "tag": "alpine", "size": "42 MB", "created": "Today"}
+            ],
+            "volumes": [
+                {"name": "test-vol", "driver": "local", "mountpoint": "/var/lib/docker/volumes/test-vol/_data"}
+            ],
+            "networks": [
+                {"name": "bridge", "driver": "bridge", "scope": "local"}
+            ]
+        },
+        headers={"x-agent-token": agent_token, "x-server-id": server_id}
+    )
+    assert inv_res.status_code == 200
+    assert inv_res.json()["status"] == "synced"
+
+    # 6. Rotate & Revoke agent token
+    rot_res = client.post(
+        f"/api/v1/servers/{server_id}/agent/rotate",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert rot_res.status_code == 200
+    assert "agent_token" in rot_res.json()
+
+    rev_res = client.post(
+        f"/api/v1/servers/{server_id}/agent/revoke",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert rev_res.status_code == 200
+
 def test_project_and_git_deployment(client):
     token = get_auth_token(client)
     # Get server
@@ -121,3 +158,51 @@ def test_project_and_git_deployment(client):
     deployment = dep_res.json()
     assert deployment["status"] in ["preparing", "building", "queued"]
     assert deployment["version"] >= 1
+
+def test_users_and_backups_crud(client):
+    token = get_auth_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Users CRUD
+    u_create = client.post(
+        "/api/v1/users",
+        json={
+            "name": "Homelab Operator",
+            "email": "operator1@psm.local",
+            "password": "OperatorPassword123!",
+            "role": "operator"
+        },
+        headers=headers
+    )
+    assert u_create.status_code == 200
+    user_id = u_create.json()["id"]
+
+    u_list = client.get("/api/v1/users", headers=headers)
+    assert u_list.status_code == 200
+    assert any(u["id"] == user_id for u in u_list.json())
+
+    u_update = client.patch(f"/api/v1/users/{user_id}", json={"role": "viewer"}, headers=headers)
+    assert u_update.status_code == 200
+    assert u_update.json()["role"] == "viewer"
+
+    u_del = client.delete(f"/api/v1/users/{user_id}", headers=headers)
+    assert u_del.status_code == 200
+
+    # Backups CRUD
+    b_create = client.post(
+        "/api/v1/backups",
+        json={"name": "Daily DB Snapshot", "backup_type": "database"},
+        headers=headers
+    )
+    assert b_create.status_code == 200
+    backup_id = b_create.json()["id"]
+
+    b_list = client.get("/api/v1/backups", headers=headers)
+    assert b_list.status_code == 200
+    assert len(b_list.json()) >= 1
+
+    b_restore = client.post(f"/api/v1/backups/{backup_id}/restore", headers=headers)
+    assert b_restore.status_code == 200
+
+    b_del = client.delete(f"/api/v1/backups/{backup_id}", headers=headers)
+    assert b_del.status_code == 200

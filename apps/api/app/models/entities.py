@@ -235,6 +235,47 @@ class DockerNetwork(Base):
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class DockerImage(Base):
+    __tablename__ = "docker_images"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    server_id = Column(String(36), ForeignKey("servers.id", ondelete="CASCADE"), nullable=False, index=True)
+    image_id = Column(String(100), nullable=False)
+    repository = Column(String(255), nullable=False)
+    tag = Column(String(100), default="latest", nullable=False)
+    size = Column(String(50), default="0 MB", nullable=False)
+    created_since = Column(String(100), default="recently", nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class Backup(Base):
+    __tablename__ = "backups"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    name = Column(String(150), nullable=False)
+    backup_type = Column(String(50), default="database", nullable=False)  # database, project, volume
+    target_id = Column(String(36), nullable=True)
+    size_bytes = Column(BigInteger, default=0, nullable=False)
+    status = Column(String(30), default="completed", nullable=False)  # completed, failed, restoring
+    file_path = Column(Text, nullable=True)
+    metadata_json = Column(JSON, nullable=True, default=dict)
+    created_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    title = Column(String(200), nullable=False)
+    message = Column(Text, nullable=False)
+    level = Column(String(20), default="info", nullable=False)  # info, warning, critical
+    is_read = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
+
+
+
 class ServerMetric(Base):
     __tablename__ = "server_metrics"
 

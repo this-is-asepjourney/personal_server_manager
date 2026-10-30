@@ -1,10 +1,11 @@
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from apps.api.app.core.config import settings
-from apps.api.app.core.security import hash_password
+from apps.api.app.core.security import hash_password, hash_token
 from apps.api.app.database.session import engine, Base, SessionLocal
-from apps.api.app.models.entities import User, Server, Container, ServerMetric, Project, ProjectSource
+from apps.api.app.models.entities import User, Server, AgentToken, Container, ServerMetric, Project, ProjectSource
 from apps.api.app.api.v1.router import api_router
 from apps.api.app.websocket.handlers import ws_router
 
@@ -43,6 +44,17 @@ def init_db():
             db.add(local_server)
             db.commit()
             db.refresh(local_server)
+
+            # Seed default agent token for Homelab-Primary so built-in agent container can auto-register
+            default_agent_token = os.getenv("HOMELAB_AGENT_TOKEN", "psm_agent_homelab_default_token")
+            db.add(
+                AgentToken(
+                    server_id=local_server.id,
+                    token_hash=hash_token(default_agent_token),
+                    name="homelab-auto-token"
+                )
+            )
+            db.commit()
 
             # Add demo containers for homelab
             containers = [
@@ -124,6 +136,18 @@ def init_db():
             )
             db.add(src)
             db.commit()
+        else:
+            primary_srv = db.query(Server).filter(Server.name == "Homelab-Primary").first()
+            if primary_srv:
+                default_agent_token = os.getenv("HOMELAB_AGENT_TOKEN", "psm_agent_homelab_default_token")
+                tok_hash = hash_token(default_agent_token)
+                existing_tok = db.query(AgentToken).filter(
+                    AgentToken.server_id == primary_srv.id,
+                    AgentToken.token_hash == tok_hash
+                ).first()
+                if not existing_tok:
+                    db.add(AgentToken(server_id=primary_srv.id, token_hash=tok_hash, name="homelab-auto-token"))
+                    db.commit()
 
     finally:
         db.close()

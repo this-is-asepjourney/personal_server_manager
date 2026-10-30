@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSoc
 from sqlalchemy.orm import Session
 from apps.api.app.database.session import get_db, SessionLocal
 from apps.api.app.core.security import hash_token
-from apps.api.app.core.dependencies import get_current_agent
+from apps.api.app.core.dependencies import get_current_agent, resolve_server
 from apps.api.app.models.entities import (
     Server,
     Agent,
@@ -13,10 +13,15 @@ from apps.api.app.models.entities import (
     ServerMetric,
     Job,
     DeploymentLog,
+    Container,
+    Volume,
+    DockerNetwork,
+    DockerImage,
 )
 from apps.api.app.schemas.all_schemas import (
     AgentRegisterRequest,
     HeartbeatRequest,
+    AgentInventoryRequest,
     MetricsReportRequest,
     JobCompleteRequest,
     JobLogBatchRequest,
@@ -29,13 +34,13 @@ router = APIRouter(prefix="/agents", tags=["Agent"])
 
 @router.post("/register")
 def register_agent(payload: AgentRegisterRequest, db: Session = Depends(get_db)):
-    server = db.query(Server).filter(Server.id == payload.server_id).first()
+    server = resolve_server(db, payload.server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
 
     token_hash = hash_token(payload.agent_token)
     token_record = db.query(AgentToken).filter(
-        AgentToken.server_id == payload.server_id,
+        AgentToken.server_id == server.id,
         AgentToken.token_hash == token_hash
     ).first()
 
@@ -44,10 +49,10 @@ def register_agent(payload: AgentRegisterRequest, db: Session = Depends(get_db))
 
     now = datetime.now(timezone.utc)
     # Create or update agent
-    agent = db.query(Agent).filter(Agent.server_id == payload.server_id).first()
+    agent = db.query(Agent).filter(Agent.server_id == server.id).first()
     if not agent:
         agent = Agent(
-            server_id=payload.server_id,
+            server_id=server.id,
             agent_version=payload.agent_version,
             credential_hash=token_hash,
             connected_at=now,
@@ -84,7 +89,7 @@ def register_agent(payload: AgentRegisterRequest, db: Session = Depends(get_db))
 
 @router.post("/heartbeat")
 def agent_heartbeat(payload: HeartbeatRequest, db: Session = Depends(get_db)):
-    server = db.query(Server).filter(Server.id == payload.server_id).first()
+    server = resolve_server(db, payload.server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
 
@@ -101,7 +106,7 @@ def agent_heartbeat(payload: HeartbeatRequest, db: Session = Depends(get_db)):
 
 @router.post("/metrics")
 async def report_metrics(payload: MetricsReportRequest, db: Session = Depends(get_db)):
-    server = db.query(Server).filter(Server.id == payload.server_id).first()
+    server = resolve_server(db, payload.server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
 
@@ -146,7 +151,77 @@ async def report_metrics(payload: MetricsReportRequest, db: Session = Depends(ge
     }
     await ws_manager.broadcast_server_event(server.id, event_data)
 
-    return {"status": "recorded"}
+    return {"status": "recorded", "server_id": server.id}
+
+@router.post("/inventory")
+def report_inventory(
+    payload: AgentInventoryRequest,
+    server: Server = Depends(get_current_agent),
+    db: Session = Depends(get_db)
+):
+    now = datetime.now(timezone.utc)
+    server.last_seen = now
+    server.status = "online"
+
+    # Sync Containers if reported
+    if payload.containers is not None and len(payload.containers) > 0:
+        db.query(Container).filter(Container.server_id == server.id).delete()
+        for c in payload.containers:
+            db.add(
+                Container(
+                    server_id=server.id,
+                    docker_id=c.get("docker_id", ""),
+                    name=c.get("name", "unnamed"),
+                    image=c.get("image", "unknown"),
+                    status=c.get("status", "stopped"),
+                    state=c.get("state", "exited"),
+                    ports=c.get("ports", []),
+                )
+            )
+
+    # Sync Images if reported
+    if payload.images is not None and len(payload.images) > 0:
+        db.query(DockerImage).filter(DockerImage.server_id == server.id).delete()
+        for img in payload.images:
+            db.add(
+                DockerImage(
+                    server_id=server.id,
+                    image_id=img.get("id", "img"),
+                    repository=img.get("repository", "<none>"),
+                    tag=img.get("tag", "latest"),
+                    size=img.get("size", "0 MB"),
+                    created_since=img.get("created", "recently"),
+                )
+            )
+
+    # Sync Volumes if reported
+    if payload.volumes is not None and len(payload.volumes) > 0:
+        db.query(Volume).filter(Volume.server_id == server.id).delete()
+        for vol in payload.volumes:
+            db.add(
+                Volume(
+                    server_id=server.id,
+                    name=vol.get("name", "volume"),
+                    driver=vol.get("driver", "local"),
+                    mountpoint=vol.get("mountpoint", ""),
+                )
+            )
+
+    # Sync Networks if reported
+    if payload.networks is not None and len(payload.networks) > 0:
+        db.query(DockerNetwork).filter(DockerNetwork.server_id == server.id).delete()
+        for net in payload.networks:
+            db.add(
+                DockerNetwork(
+                    server_id=server.id,
+                    name=net.get("name", "network"),
+                    driver=net.get("driver", "bridge"),
+                    scope=net.get("scope", "local"),
+                )
+            )
+
+    db.commit()
+    return {"status": "synced", "server_id": server.id}
 
 @router.post("/jobs/claim")
 def claim_job(server: Server = Depends(get_current_agent), db: Session = Depends(get_db)):
@@ -214,7 +289,6 @@ async def receive_job_logs(
 # --- Persistent Agent WebSocket Connection ---
 @router.websocket("/connect")
 async def agent_websocket_connect(websocket: WebSocket):
-    # Query parameters: server_id, token
     server_id = websocket.query_params.get("server_id")
     token = websocket.query_params.get("token")
 
@@ -223,23 +297,25 @@ async def agent_websocket_connect(websocket: WebSocket):
         return
 
     db = SessionLocal()
+    resolved_id = server_id
     try:
         token_hash = hash_token(token)
-        server = db.query(Server).filter(Server.id == server_id).first()
+        server = resolve_server(db, server_id)
         valid = False
         if server and server.agent and server.agent.credential_hash == token_hash and not server.agent.revoked_at:
             valid = True
         elif server:
-            tok = db.query(AgentToken).filter(AgentToken.server_id == server_id, AgentToken.token_hash == token_hash).first()
+            tok = db.query(AgentToken).filter(AgentToken.server_id == server.id, AgentToken.token_hash == token_hash).first()
             if tok:
                 valid = True
 
-        if not valid:
+        if not valid or not server:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
+        resolved_id = server.id
         # Register connection
-        await ws_manager.register_agent(server_id, websocket)
+        await ws_manager.register_agent(resolved_id, websocket)
         server.status = "online"
         server.last_seen = datetime.now(timezone.utc)
         db.commit()
@@ -258,7 +334,6 @@ async def agent_websocket_connect(websocket: WebSocket):
                 pass
 
     except WebSocketDisconnect:
-        ws_manager.unregister_agent(server_id, websocket)
+        ws_manager.unregister_agent(resolved_id, websocket)
     finally:
         db.close()
-

@@ -1,8 +1,8 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-# --- Auth Schemas ---
+# --- Auth & User Schemas ---
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -27,6 +27,12 @@ class UserCreate(BaseModel):
     password: str
     role: str = "operator"
 
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    theme: Optional[str] = None
+    is_active: Optional[bool] = None
+
 class UserResponse(BaseModel):
     id: str
     name: str
@@ -36,8 +42,7 @@ class UserResponse(BaseModel):
     is_active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- Server Schemas ---
 class ServerCreate(BaseModel):
@@ -61,8 +66,7 @@ class AgentInfoResponse(BaseModel):
     last_seen: Optional[datetime] = None
     revoked_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class MetricsSnapshot(BaseModel):
     cpu_usage: float
@@ -77,8 +81,7 @@ class MetricsSnapshot(BaseModel):
     uptime: int
     recorded_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ServerResponse(BaseModel):
     id: str
@@ -95,8 +98,7 @@ class ServerResponse(BaseModel):
     agent: Optional[AgentInfoResponse] = None
     latest_metrics: Optional[MetricsSnapshot] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ServerRegistrationResponse(BaseModel):
     server_id: str
@@ -119,6 +121,13 @@ class HeartbeatRequest(BaseModel):
     server_id: str
     agent_version: str = "0.1.0"
     status: str = "online"
+
+class AgentInventoryRequest(BaseModel):
+    server_id: str
+    containers: List[Dict[str, Any]] = []
+    images: List[Dict[str, Any]] = []
+    volumes: List[Dict[str, Any]] = []
+    networks: List[Dict[str, Any]] = []
 
 # --- Metrics Schemas ---
 class MetricsReportRequest(BaseModel):
@@ -146,8 +155,7 @@ class ContainerResponse(BaseModel):
     ports: Optional[List[Dict[str, Any]]] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ContainerActionRequest(BaseModel):
     action: str  # start, stop, restart, remove
@@ -201,8 +209,7 @@ class ProjectResponse(BaseModel):
     compose_path: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- Deployment Schemas ---
 class DeploymentCreateGit(BaseModel):
@@ -228,8 +235,7 @@ class DeploymentResponse(BaseModel):
     duration_seconds: Optional[int] = 0
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class DeploymentLogResponse(BaseModel):
     id: str
@@ -239,8 +245,7 @@ class DeploymentLogResponse(BaseModel):
     message: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- Job Schemas ---
 class JobResponse(BaseModel):
@@ -254,8 +259,7 @@ class JobResponse(BaseModel):
     attempts: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class JobCompleteRequest(BaseModel):
     status: str  # success, failed
@@ -265,6 +269,23 @@ class JobCompleteRequest(BaseModel):
 
 class JobLogBatchRequest(BaseModel):
     logs: List[Dict[str, Any]]  # [{"level": "info", "message": "...", "sequence": 1}]
+
+# --- Backup Schemas ---
+class BackupCreate(BaseModel):
+    name: str
+    backup_type: str = "database"  # database, project, volume
+    target_id: Optional[str] = None
+
+class BackupResponse(BaseModel):
+    id: str
+    name: str
+    backup_type: str
+    target_id: Optional[str] = None
+    size_bytes: int
+    status: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 # --- Audit Schemas ---
 class AuditLogResponse(BaseModel):
@@ -278,5 +299,4 @@ class AuditLogResponse(BaseModel):
     ip_address: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

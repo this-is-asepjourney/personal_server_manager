@@ -2,20 +2,15 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
 import {
-  Rocket,
   ArrowLeft,
   RotateCcw,
   Square,
   Terminal,
-  Clock,
-  CheckCircle2,
-  XCircle,
   Copy,
   Check,
 } from 'lucide-react';
-import { api, formatDuration } from '../../../lib/api';
+import { api, formatDuration, getWsBase } from '../../../lib/api';
 
 export default function DeploymentDetailPage() {
   const params = useParams();
@@ -42,22 +37,24 @@ export default function DeploymentDetailPage() {
   useEffect(() => {
     loadData();
 
-    // WebSocket connection for live log streaming
-    const wsBase = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000';
-    const ws = new WebSocket(`${wsBase}/ws/deployments/${deploymentId}/logs`);
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        setLogs((prev) => [...prev, data]);
-      } catch (_) {}
-    };
+    // WebSocket connection for live log streaming (LAN-aware)
+    const wsBase = getWsBase();
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket(`${wsBase}/ws/deployments/${deploymentId}/logs`);
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          setLogs((prev) => [...prev, data]);
+        } catch (_) {}
+      };
+    } catch (_) {}
 
     // Polling interval if websocket is inactive or pending
     const interval = setInterval(loadData, 3000);
 
     return () => {
-      ws.close();
+      if (ws) ws.close();
       clearInterval(interval);
     };
   }, [deploymentId]);
@@ -85,6 +82,18 @@ export default function DeploymentDetailPage() {
     }
   };
 
+  const handleCancel = async () => {
+    if (!confirm('Cancel this deployment?')) return;
+    try {
+      await api.cancelDeployment(deploymentId);
+      loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to cancel deployment');
+    }
+  };
+
+  const isRunning = ['queued', 'preparing', 'building', 'deploying'].includes(deployment?.status);
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -105,7 +114,7 @@ export default function DeploymentDetailPage() {
                 className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider ${
                   deployment?.status === 'success'
                     ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
-                    : deployment?.status === 'failed'
+                    : deployment?.status === 'failed' || deployment?.status === 'cancelled'
                     ? 'bg-rose-500/10 text-rose-500'
                     : 'bg-amber-500/10 text-amber-500 animate-pulse'
                 }`}
@@ -120,6 +129,15 @@ export default function DeploymentDetailPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {isRunning && (
+            <button
+              onClick={handleCancel}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-500/30 text-xs font-medium text-rose-500 hover:bg-rose-500/10 transition-colors"
+            >
+              <Square className="w-3.5 h-3.5" />
+              <span>Cancel Deployment</span>
+            </button>
+          )}
           {deployment?.status === 'success' && (
             <button
               onClick={handleRollback}
@@ -199,4 +217,3 @@ export default function DeploymentDetailPage() {
     </div>
   );
 }
-

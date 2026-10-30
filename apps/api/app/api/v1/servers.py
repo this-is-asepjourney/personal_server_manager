@@ -1,7 +1,7 @@
 import secrets
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from apps.api.app.database.session import get_db
 from apps.api.app.core.config import settings
@@ -21,13 +21,26 @@ from apps.api.app.services.job_service import create_and_dispatch_job
 
 router = APIRouter(prefix="/servers", tags=["Servers"])
 
+def _get_control_plane_url(request: Request) -> str:
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "localhost:8000"
+    scheme = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
+    if "testserver" in host:
+        return "http://localhost:8000"
+    # If host has port 3005 (from frontend proxy), point to API port 8000
+    if host.endswith(":3005"):
+        host = host.replace(":3005", ":8000")
+    elif ":" not in host and scheme == "http":
+        host = f"{host}:8000"
+    return f"{scheme}://{host}"
+
 def compute_server_status(server: Server) -> str:
     if server.status == "maintenance":
         return "maintenance"
+    if server.agent and server.agent.revoked_at:
+        return "offline"
     if not server.last_seen:
-        return "pending"
+        return server.status if server.status == "online" else "pending"
     now = datetime.now(timezone.utc)
-    # Ensure server.last_seen has timezone if naive
     last_seen = server.last_seen
     if last_seen.tzinfo is None:
         last_seen = last_seen.replace(tzinfo=timezone.utc)
@@ -44,7 +57,6 @@ def list_servers(
     result = []
     for s in servers:
         computed_status = compute_server_status(s)
-        # Fetch latest metric
         latest_metric = db.query(ServerMetric).filter(
             ServerMetric.server_id == s.id
         ).order_by(ServerMetric.recorded_at.desc()).first()
@@ -97,6 +109,7 @@ def list_servers(
 @router.post("", response_model=ServerRegistrationResponse)
 def create_server(
     payload: ServerCreate,
+    request: Request,
     current_user: User = Depends(require_role("owner", "admin")),
     db: Session = Depends(get_db)
 ):
@@ -114,7 +127,6 @@ def create_server(
     db.commit()
     db.refresh(server)
 
-    # Generate Agent token
     raw_token = f"psm_agent_{secrets.token_urlsafe(32)}"
     token_record = AgentToken(
         server_id=server.id,
@@ -124,15 +136,15 @@ def create_server(
     db.add(token_record)
     db.commit()
 
-    # Commands for user
+    cp_url = _get_control_plane_url(request)
     install_command = (
-        f"curl -sSL http://localhost:8000/install-agent.sh | "
-        f"PSM_SERVER_ID={server.id} PSM_TOKEN={raw_token} PSM_CONTROL_PLANE=http://localhost:8000 bash"
+        f"curl -sSL {cp_url}/install-agent.sh | "
+        f"PSM_SERVER_ID={server.id} PSM_TOKEN={raw_token} PSM_CONTROL_PLANE={cp_url} bash"
     )
     docker_run_command = (
         f"docker run -d --name psm-agent --restart unless-stopped "
         f"-v /var/run/docker.sock:/var/run/docker.sock -v /opt/psm:/opt/psm "
-        f"-e SERVER_ID={server.id} -e AGENT_TOKEN={raw_token} -e CONTROL_PLANE_URL=http://localhost:8000 "
+        f"-e SERVER_ID={server.id} -e AGENT_TOKEN={raw_token} -e CONTROL_PLANE_URL={cp_url} "
         f"personal-server-manager-agent:latest"
     )
 
@@ -308,3 +320,103 @@ async def request_server_reconnect(
     )
     return {"message": "Ping job dispatched to agent", "job_id": job.id}
 
+@router.get("/{server_id}/agent")
+def get_server_agent(
+    server_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    s = db.query(Server).filter(Server.id == server_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Server not found")
+    if not s.agent:
+        return {"registered": False, "server_id": s.id}
+    return {
+        "registered": True,
+        "id": s.agent.id,
+        "server_id": s.id,
+        "agent_version": s.agent.agent_version,
+        "connected_at": s.agent.connected_at,
+        "last_seen": s.agent.last_seen,
+        "revoked_at": s.agent.revoked_at
+    }
+
+@router.post("/{server_id}/agent/revoke")
+def revoke_server_agent(
+    server_id: str,
+    current_user: User = Depends(require_role("owner", "admin")),
+    db: Session = Depends(get_db)
+):
+    s = db.query(Server).filter(Server.id == server_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    now = datetime.now(timezone.utc)
+    if s.agent:
+        s.agent.revoked_at = now
+    db.query(AgentToken).filter(AgentToken.server_id == server_id).delete()
+    s.status = "offline"
+    db.commit()
+
+    log_activity(
+        db,
+        action="agent.revoke",
+        resource_type="server",
+        resource_id=server_id,
+        user_id=current_user.id,
+        details={"server_name": s.name}
+    )
+    return {"message": "Agent credentials revoked successfully", "server_id": server_id}
+
+@router.post("/{server_id}/agent/rotate", response_model=ServerRegistrationResponse)
+def rotate_server_agent_token(
+    server_id: str,
+    request: Request,
+    current_user: User = Depends(require_role("owner", "admin")),
+    db: Session = Depends(get_db)
+):
+    s = db.query(Server).filter(Server.id == server_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    db.query(AgentToken).filter(AgentToken.server_id == server_id).delete()
+    raw_token = f"psm_agent_{secrets.token_urlsafe(32)}"
+    token_hash = hash_token(raw_token)
+    token_record = AgentToken(
+        server_id=s.id,
+        token_hash=token_hash,
+        name=f"rotated-{s.name}"
+    )
+    db.add(token_record)
+    if s.agent:
+        s.agent.credential_hash = token_hash
+        s.agent.revoked_at = None
+    db.commit()
+
+    cp_url = _get_control_plane_url(request)
+    install_command = (
+        f"curl -sSL {cp_url}/install-agent.sh | "
+        f"PSM_SERVER_ID={s.id} PSM_TOKEN={raw_token} PSM_CONTROL_PLANE={cp_url} bash"
+    )
+    docker_run_command = (
+        f"docker run -d --name psm-agent --restart unless-stopped "
+        f"-v /var/run/docker.sock:/var/run/docker.sock -v /opt/psm:/opt/psm "
+        f"-e SERVER_ID={s.id} -e AGENT_TOKEN={raw_token} -e CONTROL_PLANE_URL={cp_url} "
+        f"personal-server-manager-agent:latest"
+    )
+
+    log_activity(
+        db,
+        action="agent.rotate_token",
+        resource_type="server",
+        resource_id=s.id,
+        user_id=current_user.id,
+        details={"server_name": s.name}
+    )
+
+    return {
+        "server_id": s.id,
+        "agent_token": raw_token,
+        "install_command": install_command,
+        "docker_run_command": docker_run_command
+    }
