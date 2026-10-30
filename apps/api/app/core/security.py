@@ -2,7 +2,10 @@ import base64
 import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Union
-import jwt
+try:
+    import jwt
+except ImportError:
+    from jose import jwt  # type: ignore
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from cryptography.fernet import Fernet

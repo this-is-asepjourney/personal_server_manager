@@ -1,5 +1,8 @@
 import os
-from pydantic_settings import BaseSettings
+try:
+    from pydantic_settings import BaseSettings
+except ImportError:
+    from pydantic import BaseModel as BaseSettings  # type: ignore
 
 class AgentSettings(BaseSettings):
     SERVER_ID: str = os.getenv("SERVER_ID", "default-server")
