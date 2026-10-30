@@ -6,9 +6,12 @@ export function getApiBase(): string {
     return process.env.NEXT_PUBLIC_API_URL;
   }
   if (typeof window !== 'undefined') {
-    return `${window.location.protocol}//${window.location.hostname}:8000`;
+    // Same-origin: requests go to the web port (3005) and are proxied by Next.js
+    // rewrites to the API container. Works over LAN, Tailscale, or a reverse proxy
+    // without exposing port 8000 to the browser.
+    return '';
   }
-  return process.env.INTERNAL_API_URL || 'http://localhost:8000';
+  return process.env.INTERNAL_API_URL || 'http://api:8000';
 }
 
 export function getWsBase(): string {

@@ -2,7 +2,8 @@
 const nextConfig = {
   reactStrictMode: true,
   async rewrites() {
-    const apiUrl = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    // Rewrites are resolved at build time; inside Docker the API is reachable as http://api:8000
+    const apiUrl = process.env.INTERNAL_API_URL || 'http://api:8000';
     return [
       {
         source: '/api/v1/:path*',
