@@ -42,3 +42,4 @@ User selects repo/branch or uploads ZIP
 1. Every successful deployment records the Docker image tag (e.g., `sample-app:v1`).
 2. When the operator triggers a rollback, PSM creates a new deployment version pointing to the previous image tag.
 3. The agent restores the containers immediately without re-compiling from source.
+

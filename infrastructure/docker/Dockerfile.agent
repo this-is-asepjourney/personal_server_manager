@@ -16,3 +16,4 @@ COPY apps/agent/ apps/agent/
 ENV PYTHONPATH=/app
 
 CMD ["python", "-m", "apps.agent.app.main"]
+

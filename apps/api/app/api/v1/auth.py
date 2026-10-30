@@ -137,3 +137,4 @@ def change_password(
         user_id=current_user.id
     )
     return {"message": "Password changed successfully. Please log in again."}
+

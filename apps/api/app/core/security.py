@@ -81,3 +81,4 @@ def decrypt_secret(ciphertext: str) -> str:
         return f.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
     except Exception:
         return ""
+

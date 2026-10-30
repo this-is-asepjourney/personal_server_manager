@@ -411,3 +411,4 @@ def get_deployment_logs(
         DeploymentLog.deployment_id == deployment_id
     ).order_by(DeploymentLog.sequence.asc()).all()
     return logs
+

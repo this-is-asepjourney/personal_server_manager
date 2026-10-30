@@ -83,3 +83,4 @@ def get_current_agent(
             detail="Invalid or revoked agent credentials"
         )
     return server
+

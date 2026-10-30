@@ -66,3 +66,4 @@ Personal Server Manager (PSM) is a self-hosted server management platform archit
 | Cockpit | 9090 | Preserved |
 | Prometheus Snap | 9001 | Metrics Source |
 | PSM PostgreSQL | 5432 | Internal DB |
+

@@ -22,3 +22,4 @@ async def deployment_logs_ws(websocket: WebSocket, deployment_id: str):
             await websocket.receive_text()
     except WebSocketDisconnect:
         ws_manager.disconnect_deployment_listener(deployment_id, websocket)
+

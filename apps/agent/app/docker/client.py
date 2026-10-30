@@ -94,3 +94,4 @@ class DockerManager:
             return f"Error reading logs: {e}"
 
 docker_manager = DockerManager()
+

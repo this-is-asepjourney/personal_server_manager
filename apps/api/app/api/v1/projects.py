@@ -285,3 +285,4 @@ def get_project_deployments(
         Deployment.project_id == project_id
     ).order_by(Deployment.created_at.desc()).all()
     return deployments
+

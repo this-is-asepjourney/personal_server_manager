@@ -193,3 +193,4 @@ EOF
 echo "PSM Agent configured successfully at $INSTALL_DIR/agent.env"
 """
     return Response(content=script_content, media_type="text/x-shellscript")
+

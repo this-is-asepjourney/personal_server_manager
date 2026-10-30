@@ -25,3 +25,4 @@ class AgentSettings(BaseSettings):
 agent_settings = AgentSettings()
 os.makedirs(agent_settings.WORKSPACE_DIR, exist_ok=True)
 os.makedirs(agent_settings.RELEASE_DIR, exist_ok=True)
+

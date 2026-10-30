@@ -99,3 +99,4 @@ def complete_job(
     db.commit()
     db.refresh(job)
     return job
+

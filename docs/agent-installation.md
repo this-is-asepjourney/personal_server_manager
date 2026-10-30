@@ -42,3 +42,4 @@ docker run -d \
 ```
 
 Once started, the agent immediately handshakes with the Control Plane and reports metrics every 5 seconds.
+

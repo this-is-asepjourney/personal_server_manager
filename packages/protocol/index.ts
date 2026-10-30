@@ -50,3 +50,4 @@ export interface JobResultPayload {
   output?: Record<string, any>;
   duration_seconds: number;
 }
+

@@ -62,3 +62,4 @@ Base API Path: `/api/v1`
 - `/ws/servers/{server_id}/metrics`: Live server metrics streaming.
 - `/ws/servers/{server_id}/events`: Cluster events.
 - `/ws/deployments/{deployment_id}/logs`: Live streaming terminal build logs.
+

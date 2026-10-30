@@ -23,3 +23,4 @@ def log_activity(
     db.commit()
     db.refresh(entry)
     return entry
+

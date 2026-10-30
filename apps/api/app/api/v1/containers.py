@@ -203,3 +203,4 @@ def list_networks(
             {"id": "net-3", "name": "psm-network", "driver": "bridge", "scope": "local"}
         ]
     return networks
+

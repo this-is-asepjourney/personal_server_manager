@@ -261,3 +261,4 @@ async def agent_websocket_connect(websocket: WebSocket):
         ws_manager.unregister_agent(server_id, websocket)
     finally:
         db.close()
+

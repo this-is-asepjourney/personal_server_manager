@@ -57,3 +57,4 @@ settings = Settings()
 # Ensure storage directories exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 os.makedirs(settings.RELEASE_DIR, exist_ok=True)
+

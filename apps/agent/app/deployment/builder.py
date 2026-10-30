@@ -58,3 +58,4 @@ class DeploymentEngine:
             log_callback("info", line.strip())
         proc.wait()
         return proc.returncode == 0
+

@@ -27,3 +27,4 @@ Managing Docker on remote servers involves high host privileges. PSM applies def
 
 ## 5. Audit Logging
 Every sensitive action (logins, logouts, container state changes, server registration/deletion, deployment triggers, rollbacks, and credential rotations) is permanently recorded in `audit_logs` with timestamps and client IP addresses.
+

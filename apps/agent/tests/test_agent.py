@@ -40,3 +40,4 @@ def test_safe_zip_extraction(tmp_path):
     success = DeploymentEngine.safe_extract_zip(str(zip_path), str(extract_dir))
     assert success is True
     assert (extract_dir / "index.js").exists()
+

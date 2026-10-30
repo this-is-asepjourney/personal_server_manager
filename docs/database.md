@@ -87,3 +87,4 @@ erDiagram
 12. `containers`: Inventory of running and stopped Docker containers.
 13. `server_metrics`: Snapshots of CPU, memory, disk, network, and uptime.
 14. `audit_logs`: Audit trail for security actions, logins, container restarts, and deployments.
+

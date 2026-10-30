@@ -59,3 +59,4 @@ def get_metrics_snapshot() -> Dict[str, Any]:
         "network_tx_bytes_per_sec": round(tx_rate, 1),
         "uptime_seconds": uptime_seconds
     }
+

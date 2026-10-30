@@ -40,3 +40,4 @@ EOF
 chmod 600 "$INSTALL_DIR/agent.env"
 echo "PSM Agent configuration written to $INSTALL_DIR/agent.env."
 echo "Agent installation complete. Ready to run via systemd or docker."
+
