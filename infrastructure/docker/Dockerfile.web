@@ -18,5 +18,5 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY --from=builder /app ./
 
-EXPOSE 3000
+EXPOSE 3005
 CMD ["npm", "start"]
