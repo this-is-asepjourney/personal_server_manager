@@ -1,0 +1,42 @@
+import pytest
+import os
+import zipfile
+from apps.agent.app.collectors.metrics import get_metrics_snapshot, get_system_info
+from apps.agent.app.jobs.handlers import ALLOWED_JOB_TYPES, handle_server_ping
+from apps.agent.app.deployment.builder import DeploymentEngine
+
+def test_system_and_metrics_collector():
+    sys_info = get_system_info()
+    assert "os_name" in sys_info
+    assert "hostname" in sys_info
+
+    metrics = get_metrics_snapshot()
+    assert "cpu_usage" in metrics
+    assert "memory_usage" in metrics
+    assert "disk_usage" in metrics
+    assert 0 <= metrics["cpu_usage"] <= 100
+    assert 0 <= metrics["memory_usage"] <= 100
+
+def test_allowed_job_types():
+    assert "server.ping" in ALLOWED_JOB_TYPES
+    assert "container.start" in ALLOWED_JOB_TYPES
+    assert "deployment.git" in ALLOWED_JOB_TYPES
+    assert "arbitrary.shell" not in ALLOWED_JOB_TYPES
+
+def test_server_ping_handler():
+    logs = []
+    res = handle_server_ping({}, lambda level, msg: logs.append((level, msg)))
+    assert res["status"] == "pong"
+    assert len(logs) == 1
+
+def test_safe_zip_extraction(tmp_path):
+    zip_path = tmp_path / "test.zip"
+    extract_dir = tmp_path / "extracted"
+
+    # Create benign zip
+    with zipfile.ZipFile(zip_path, "w") as z:
+        z.writestr("index.js", "console.log('hello world');")
+
+    success = DeploymentEngine.safe_extract_zip(str(zip_path), str(extract_dir))
+    assert success is True
+    assert (extract_dir / "index.js").exists()
