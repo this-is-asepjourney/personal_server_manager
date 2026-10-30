@@ -26,7 +26,12 @@ services:
     ports:
       - "${API_PORT:-8000}:8000"
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql://psm:psm_super_secret_password_change_in_production@postgres:5432/psm}
+      # Always built from POSTGRES_* so it matches the bundled psm-postgres container.
+      # Set PSM_DATABASE_URL in .env only if you want to use an external database.
+      - DATABASE_URL=${PSM_DATABASE_URL:-postgresql+psycopg2://${POSTGRES_USER:-psm}:${POSTGRES_PASSWORD:-psm_super_secret_password_change_in_production}@postgres:5432/${POSTGRES_DB:-psm}}
+      - STORAGE_BASE_DIR=/opt/psm
+      - UPLOAD_DIR=/opt/psm/uploads
+      - RELEASE_DIR=/opt/psm/releases
       - SECRET_KEY=${SECRET_KEY:-b8f36a89270df8417727e025170d1fa78f5f4d8520857ef51fa930f785b96a4e}
       - ENCRYPTION_MASTER_KEY=${ENCRYPTION_MASTER_KEY:-dGhpcy1pcy1hLXNhbXBsZS1mZXJuZXQta2V5LTMyeS0=}
       - HOMELAB_AGENT_TOKEN=${HOMELAB_AGENT_TOKEN:-psm_agent_homelab_default_token}
@@ -75,7 +80,7 @@ services:
     volumes:
       - psm-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U psm -d psm"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5

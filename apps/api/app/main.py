@@ -9,7 +9,25 @@ from apps.api.app.models.entities import User, Server, AgentToken, Container, Se
 from apps.api.app.api.v1.router import api_router
 from apps.api.app.websocket.handlers import ws_router
 
+def _wait_for_database(max_attempts: int = 15, delay: float = 2.0):
+    """Retry DB connection on startup and print a clear diagnostic on failure."""
+    import time
+    from sqlalchemy import text
+    last_err = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            return
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            safe_url = engine.url.render_as_string(hide_password=True)
+            print(f"[PSM] Database not reachable ({safe_url}) attempt {attempt}/{max_attempts}: {e.__class__.__name__}: {e}", flush=True)
+            time.sleep(delay)
+    raise RuntimeError(f"Could not connect to database: {last_err}")
+
 def init_db():
+    _wait_for_database()
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
