@@ -3,7 +3,7 @@ import shutil
 import zipfile
 import subprocess
 import re
-from typing import Callable, Optional, Dict, Any
+from typing import Callable, Optional, Dict, Any, List
 
 class DeploymentEngine:
     @staticmethod
@@ -42,20 +42,27 @@ class DeploymentEngine:
         log_callback: Callable[[str, str], None],
         commit_hash: Optional[str] = None
     ) -> bool:
-        """Clone or pull git repository."""
+        """Clone or pull git repository with clean workspace reset."""
         os.makedirs(target_dir, exist_ok=True)
         git_dir = os.path.join(target_dir, ".git")
 
         if os.path.exists(git_dir):
             log_callback("info", f"[Git] Fetching latest changes from branch '{branch}'...")
-            cmd = ["git", "-C", target_dir, "pull", "origin", branch]
+            subprocess.run(["git", "-C", target_dir, "fetch", "origin", branch], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            cmd = ["git", "-C", target_dir, "reset", "--hard", f"origin/{branch}"]
         else:
+            # If target dir exists but is not a clean git repo, clean it first
+            if os.path.exists(target_dir) and os.listdir(target_dir):
+                shutil.rmtree(target_dir, ignore_errors=True)
+                os.makedirs(target_dir, exist_ok=True)
             log_callback("info", f"[Git] Cloning repository {repo_url} (branch: {branch})...")
             cmd = ["git", "clone", "--depth", "1", "--branch", branch, repo_url, target_dir]
 
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         for line in proc.stdout:
-            log_callback("info", line.strip())
+            clean = line.strip()
+            if clean:
+                log_callback("info", clean)
         proc.wait()
 
         if proc.returncode != 0:
@@ -76,6 +83,24 @@ class DeploymentEngine:
         return True
 
     @staticmethod
+    def _get_compose_cmd() -> Optional[List[str]]:
+        """Detect available Docker Compose executable (V2 plugin or standalone)."""
+        docker_bin = shutil.which("docker") or "/usr/bin/docker"
+        if os.path.exists(docker_bin) or shutil.which("docker"):
+            try:
+                res = subprocess.run([docker_bin, "compose", "version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=4)
+                if res.returncode == 0:
+                    return [docker_bin, "compose"]
+            except Exception:
+                pass
+
+        dc_bin = shutil.which("docker-compose") or "/usr/local/bin/docker-compose"
+        if os.path.exists(dc_bin) or shutil.which("docker-compose"):
+            return [dc_bin]
+
+        return None
+
+    @staticmethod
     def build_and_deploy_compose(
         workspace_dir: str,
         compose_file: str,
@@ -84,52 +109,43 @@ class DeploymentEngine:
         """Execute docker compose up -d --build."""
         compose_path = os.path.join(workspace_dir, compose_file)
         if not os.path.exists(compose_path):
+            log_callback("error", f"[Compose] Compose specification not found at {compose_path}")
             return False
 
-        cmd = ["docker", "compose", "-f", compose_file, "up", "-d", "--build", "--remove-orphans"]
+        compose_cmd = DeploymentEngine._get_compose_cmd()
+        if not compose_cmd:
+            log_callback("error", "[Compose] Neither 'docker compose' (V2 plugin) nor 'docker-compose' was found in PATH.")
+            return False
+
+        cmd = [*compose_cmd, "-f", compose_file, "up", "-d", "--build", "--remove-orphans"]
         log_callback("info", f"[Compose] Launching stack: {' '.join(cmd)}")
-        proc = subprocess.Popen(cmd, cwd=workspace_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for line in proc.stdout:
-            log_callback("info", line.strip())
-        proc.wait()
-        return proc.returncode == 0
+        try:
+            proc = subprocess.Popen(cmd, cwd=workspace_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in proc.stdout:
+                clean = line.strip()
+                if clean:
+                    log_callback("info", clean)
+            proc.wait()
+            if proc.returncode != 0:
+                log_callback("error", f"[Compose] Stack deployment failed with exit code {proc.returncode}")
+                return False
+
+            log_callback("info", f"[Compose] Stack deployed successfully!")
+            return True
+        except Exception as e:
+            log_callback("error", f"[Compose] Process execution error: {e}")
+            return False
 
     @staticmethod
-    def build_and_run_dockerfile(
-        workspace_dir: str,
-        dockerfile_path: str,
-        image_tag: str,
-        container_name: str,
-        log_callback: Callable[[str, str], None]
-    ) -> bool:
-        """Build image using Dockerfile and launch container directly."""
-        full_df_path = os.path.join(workspace_dir, dockerfile_path)
-        if not os.path.exists(full_df_path):
-            log_callback("error", f"[Docker] Dockerfile not found at {full_df_path}")
-            return False
+    def _extract_port_args(full_df_path: str, workspace_dir: str, log_callback: Callable[[str, str], None]) -> List[str]:
+        port_args: List[str] = []
+        env_dict = DeploymentEngine._load_env_dict(workspace_dir)
+        explicit_port = env_dict.get("PORT") or env_dict.get("HOST_PORT")
+        if explicit_port and explicit_port.isdigit():
+            port_args.extend(["-p", f"{explicit_port}:{explicit_port}"])
+            log_callback("info", f"[Docker] Mapping port {explicit_port}:{explicit_port} from environment configuration")
+            return port_args
 
-        # 1. Build image
-        log_callback("info", f"[Docker] Building image '{image_tag}' from {dockerfile_path}...")
-        build_cmd = ["docker", "build", "-t", image_tag, "-f", dockerfile_path, "."]
-        build_proc = subprocess.Popen(build_cmd, cwd=workspace_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for line in build_proc.stdout:
-            log_callback("info", line.strip())
-        build_proc.wait()
-
-        if build_proc.returncode != 0:
-            log_callback("error", f"[Docker] Image build failed with exit code {build_proc.returncode}")
-            return False
-
-        log_callback("info", f"[Docker] Image '{image_tag}' built successfully.")
-
-        # 2. Stop and remove existing container if running
-        sanitized_name = re.sub(r"[^a-zA-Z0-9_.-]", "-", container_name.lower())
-        log_callback("info", f"[Docker] Checking for existing container '{sanitized_name}'...")
-        subprocess.run(["docker", "stop", sanitized_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["docker", "rm", "-f", sanitized_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-        # 3. Detect exposed ports from Dockerfile
-        port_args = []
         try:
             with open(full_df_path, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read()
@@ -139,24 +155,178 @@ class DeploymentEngine:
                     log_callback("info", f"[Docker] Detected EXPOSE {port}, mapping to host port {port}")
         except Exception:
             pass
+        return port_args
 
-        # 4. Run new container
-        run_cmd = ["docker", "run", "-d", "--restart", "unless-stopped", "--name", sanitized_name]
+    @staticmethod
+    def _extract_ports_dict(full_df_path: str, workspace_dir: str, log_callback: Callable[[str, str], None]) -> Dict[str, int]:
+        ports: Dict[str, int] = {}
+        env_dict = DeploymentEngine._load_env_dict(workspace_dir)
+        explicit_port = env_dict.get("PORT") or env_dict.get("HOST_PORT")
+        if explicit_port and explicit_port.isdigit():
+            p = int(explicit_port)
+            ports[f"{p}/tcp"] = p
+            log_callback("info", f"[Docker-SDK] Mapping container port {p} from environment")
+            return ports
+
+        try:
+            with open(full_df_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+                matches = re.findall(r"EXPOSE\s+(\d+)", content, re.IGNORECASE)
+                for port in matches:
+                    p = int(port)
+                    ports[f"{p}/tcp"] = p
+                    log_callback("info", f"[Docker-SDK] Detected EXPOSE {p}, mapping port")
+        except Exception:
+            pass
+        return ports
+
+    @staticmethod
+    def _load_env_dict(workspace_dir: str) -> Dict[str, str]:
+        env_dict: Dict[str, str] = {}
         env_file_path = os.path.join(workspace_dir, ".env")
         if os.path.exists(env_file_path):
-            run_cmd.extend(["--env-file", ".env"])
-        run_cmd.extend(port_args)
-        run_cmd.append(image_tag)
+            try:
+                with open(env_file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            env_dict[k.strip()] = v.strip()
+            except Exception:
+                pass
+        return env_dict
 
-        log_callback("info", f"[Docker] Running container: {' '.join(run_cmd)}")
-        run_proc = subprocess.Popen(run_cmd, cwd=workspace_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for line in run_proc.stdout:
-            log_callback("info", line.strip())
-        run_proc.wait()
-
-        if run_proc.returncode != 0:
-            log_callback("error", f"[Docker] Container run failed with exit code {run_proc.returncode}")
+    @staticmethod
+    def build_and_run_dockerfile(
+        workspace_dir: str,
+        dockerfile_path: str,
+        image_tag: str,
+        container_name: str,
+        log_callback: Callable[[str, str], None]
+    ) -> bool:
+        """Build image using Dockerfile and launch container directly.
+        Supports both Docker CLI and Python Docker SDK fallback via /var/run/docker.sock.
+        """
+        full_df_path = os.path.join(workspace_dir, dockerfile_path)
+        if not os.path.exists(full_df_path):
+            log_callback("error", f"[Docker] Dockerfile not found at {full_df_path}")
             return False
 
-        log_callback("info", f"[Docker] Container '{sanitized_name}' is now running!")
-        return True
+        sanitized_tag = re.sub(r"[^a-z0-9_.:-]", "-", image_tag.lower())
+        sanitized_name = re.sub(r"[^a-zA-Z0-9_.-]", "-", container_name.lower())
+
+        # 1. Check if Docker CLI is available
+        docker_bin = shutil.which("docker") or "/usr/bin/docker"
+        cli_available = False
+        if os.path.exists(docker_bin) or shutil.which("docker"):
+            try:
+                chk = subprocess.run([docker_bin, "info"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=4)
+                cli_available = (chk.returncode == 0)
+            except Exception:
+                cli_available = False
+
+        if cli_available:
+            log_callback("info", f"[Docker-CLI] Building image '{sanitized_tag}' from {dockerfile_path}...")
+            build_cmd = [docker_bin, "build", "-t", sanitized_tag, "-f", dockerfile_path, "."]
+            try:
+                build_proc = subprocess.Popen(build_cmd, cwd=workspace_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                for line in build_proc.stdout:
+                    clean = line.strip()
+                    if clean:
+                        log_callback("info", clean)
+                build_proc.wait()
+                if build_proc.returncode != 0:
+                    log_callback("error", f"[Docker-CLI] Build failed with exit code {build_proc.returncode}")
+                    return False
+            except Exception as e:
+                log_callback("error", f"[Docker-CLI] Build execution error: {e}")
+                return False
+
+            log_callback("info", f"[Docker-CLI] Image '{sanitized_tag}' built successfully.")
+
+            # Stop & remove existing container
+            log_callback("info", f"[Docker-CLI] Removing existing container '{sanitized_name}'...")
+            subprocess.run([docker_bin, "stop", sanitized_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run([docker_bin, "rm", "-f", sanitized_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            # Ports & Run
+            port_args = DeploymentEngine._extract_port_args(full_df_path, workspace_dir, log_callback)
+            run_cmd = [docker_bin, "run", "-d", "--restart", "unless-stopped", "--name", sanitized_name]
+            env_file_path = os.path.join(workspace_dir, ".env")
+            if os.path.exists(env_file_path):
+                run_cmd.extend(["--env-file", ".env"])
+            run_cmd.extend(port_args)
+            run_cmd.append(sanitized_tag)
+
+            log_callback("info", f"[Docker-CLI] Running container: {' '.join(run_cmd)}")
+            try:
+                run_proc = subprocess.Popen(run_cmd, cwd=workspace_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                for line in run_proc.stdout:
+                    clean = line.strip()
+                    if clean:
+                        log_callback("info", clean)
+                run_proc.wait()
+                if run_proc.returncode != 0:
+                    log_callback("error", f"[Docker-CLI] Container launch failed with exit code {run_proc.returncode}")
+                    return False
+
+                log_callback("info", f"[Docker-CLI] Container '{sanitized_name}' is now running successfully!")
+                return True
+            except Exception as e:
+                log_callback("error", f"[Docker-CLI] Launch execution error: {e}")
+                return False
+
+        # 2. FALLBACK: Use Python Docker SDK directly through /var/run/docker.sock
+        log_callback("info", f"[Docker-SDK] CLI binary not in PATH. Utilizing Docker daemon socket connection...")
+        try:
+            import docker
+            client = docker.from_env()
+            client.ping()
+
+            log_callback("info", f"[Docker-SDK] Building image '{sanitized_tag}' from {dockerfile_path}...")
+            build_logs = client.api.build(
+                path=workspace_dir,
+                dockerfile=dockerfile_path,
+                tag=sanitized_tag,
+                rm=True,
+                decode=True
+            )
+            for chunk in build_logs:
+                if "stream" in chunk:
+                    for line in chunk["stream"].splitlines():
+                        clean = line.strip()
+                        if clean:
+                            log_callback("info", clean)
+                elif "error" in chunk:
+                    log_callback("error", chunk["error"].strip())
+                    return False
+
+            log_callback("info", f"[Docker-SDK] Image '{sanitized_tag}' built successfully.")
+
+            # Stop & remove existing container
+            try:
+                existing = client.containers.get(sanitized_name)
+                log_callback("info", f"[Docker-SDK] Removing existing container '{sanitized_name}'...")
+                existing.stop(timeout=5)
+                existing.remove(force=True)
+            except Exception:
+                pass
+
+            # Extract ports & environment variables
+            ports_mapping = DeploymentEngine._extract_ports_dict(full_df_path, workspace_dir, log_callback)
+            env_dict = DeploymentEngine._load_env_dict(workspace_dir)
+
+            log_callback("info", f"[Docker-SDK] Launching container '{sanitized_name}'...")
+            c = client.containers.run(
+                image=sanitized_tag,
+                name=sanitized_name,
+                detach=True,
+                restart_policy={"Name": "unless-stopped"},
+                ports=ports_mapping if ports_mapping else None,
+                environment=env_dict if env_dict else None
+            )
+            log_callback("info", f"[Docker-SDK] Container '{sanitized_name}' ({c.short_id}) launched and operational!")
+            return True
+        except Exception as sdk_err:
+            log_callback("error", f"[Docker-SDK] Failure via Docker daemon socket: {sdk_err}")
+            return False

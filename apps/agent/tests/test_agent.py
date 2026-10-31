@@ -50,3 +50,23 @@ def test_safe_zip_extraction(tmp_path):
     assert success is True
     assert (extract_dir / "index.js").exists()
 
+def test_deployment_port_extraction_and_env(tmp_path):
+    df_path = tmp_path / "Dockerfile"
+    df_path.write_text("FROM alpine\nEXPOSE 3000\nCMD ['echo', 'hi']\n")
+
+    logs = []
+    args = DeploymentEngine._extract_port_args(str(df_path), str(tmp_path), lambda lvl, msg: logs.append(msg))
+    assert "-p" in args
+    assert "3000:3000" in args
+
+    # Check env override
+    env_file = tmp_path / ".env"
+    env_file.write_text("PORT=8085\n")
+    args_env = DeploymentEngine._extract_port_args(str(df_path), str(tmp_path), lambda lvl, msg: logs.append(msg))
+    assert "8085:8085" in args_env
+
+    # Missing Dockerfile handling
+    res = DeploymentEngine.build_and_run_dockerfile(str(tmp_path), "MissingDockerfile", "tag:v1", "app", lambda l, m: None)
+    assert res is False
+
+
