@@ -19,16 +19,20 @@ services:
 
   api:
     build:
-      context: .  
+      context: .
       dockerfile: infrastructure/docker/Dockerfile.api
     container_name: psm-api
     restart: unless-stopped
     ports:
       - "${API_PORT:-8000}:8000"
     environment:
-      # Always built from POSTGRES_* so it matches the bundled psm-postgres container.
-      # Set PSM_DATABASE_URL in .env only if you want to use an external database.
+      # Built from POSTGRES_* and automatically creates database if missing.
       - DATABASE_URL=${PSM_DATABASE_URL:-postgresql+psycopg2://${POSTGRES_USER:-psm}:${POSTGRES_PASSWORD:-psm_super_secret_password_change_in_production}@postgres:5432/${POSTGRES_DB:-psm}}
+      - POSTGRES_DB=${POSTGRES_DB:-psm}
+      - POSTGRES_USER=${POSTGRES_USER:-psm}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-psm_super_secret_password_change_in_production}
+      - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
       - STORAGE_BASE_DIR=/opt/psm
       - UPLOAD_DIR=/opt/psm/uploads
       - RELEASE_DIR=/opt/psm/releases
@@ -63,6 +67,13 @@ services:
       - AGENT_TOKEN=${HOMELAB_AGENT_TOKEN:-psm_agent_homelab_default_token}
       - CONTROL_PLANE_URL=http://api:8000
       - PSM_BASE_DIR=/opt/psm
+      - POSTGRES_DB=${POSTGRES_DB:-psm}
+      - POSTGRES_USER=${POSTGRES_USER:-psm}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-psm_super_secret_password_change_in_production}
+      - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - psm-storage:/opt/psm
@@ -88,7 +99,11 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - psm-network
+      psm-network:
+        aliases:
+          - postgres
+          - psm-postgres
+          - db
 
 volumes:
   psm-postgres:
@@ -96,4 +111,5 @@ volumes:
 
 networks:
   psm-network:
+    name: psm-network
     driver: bridge

@@ -70,3 +70,41 @@ def test_deployment_port_extraction_and_env(tmp_path):
     assert res is False
 
 
+def test_postgres_auto_connect_and_dockerfile_injection(tmp_path):
+    # 1. Test .env.example preservation + PostgreSQL auto-connect override
+    env_example = tmp_path / ".env.example"
+    env_example.write_text("APP_NAME=StockUMKM\nAPP_KEY=base64:123\nDB_CONNECTION=mysql\nDB_DATABASE=old_db\n")
+
+    logs = []
+    merged_env = DeploymentEngine.ensure_project_postgres_db(
+        project_name="Stock-UMKM",
+        env_vars={"DB_CONNECTION": "mysql"},
+        db_config={"db_name": "stock_umkm", "user": "appuser", "password": "secret", "port": 5432},
+        log_callback=lambda lvl, msg: logs.append(msg),
+    )
+    assert merged_env["DB_CONNECTION"] == "pgsql"
+    assert merged_env["DB_DATABASE"] == "stock_umkm"
+    assert merged_env["POSTGRES_DB"] == "stock_umkm"
+    assert "postgresql://" in merged_env["DATABASE_URL"]
+
+    DeploymentEngine.write_env_file(str(tmp_path), merged_env)
+    written_env = (tmp_path / ".env").read_text()
+    assert "APP_NAME=StockUMKM" in written_env
+    assert "DB_CONNECTION=pgsql" in written_env
+    assert "DB_DATABASE=stock_umkm" in written_env
+
+    # 2. Test PHP Dockerfile auto-injection of pdo_pgsql
+    df = tmp_path / "Dockerfile"
+    df.write_text(
+        "FROM php:8.4-apache\n"
+        "RUN docker-php-ext-install pdo pdo_mysql\n"
+        "EXPOSE 8080\n"
+        "ENTRYPOINT [\"/entrypoint.sh\"]\n"
+    )
+    DeploymentEngine.prepare_dockerfile_for_postgres(str(tmp_path), "Dockerfile", lambda lvl, msg: logs.append(msg))
+    updated_df = df.read_text()
+    assert "pdo_pgsql" in updated_df
+    assert "libpq-dev" in updated_df
+
+
+

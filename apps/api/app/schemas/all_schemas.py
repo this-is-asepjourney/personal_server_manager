@@ -197,6 +197,12 @@ class ProjectCreate(BaseModel):
     branch: Optional[str] = "main"
     dockerfile_path: Optional[str] = "Dockerfile"
     compose_path: Optional[str] = "docker-compose.yml"
+    auto_provision_db: bool = True
+    database_name: Optional[str] = None
+
+class ProjectDatabaseProvisionRequest(BaseModel):
+    db_name: Optional[str] = None
+    override_env: bool = True
 
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None

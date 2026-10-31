@@ -17,12 +17,20 @@ from apps.api.app.schemas.all_schemas import (
     ProjectCreate,
     ProjectUpdate,
     ProjectResponse,
+    ProjectDatabaseProvisionRequest,
     EnvironmentUpdateRequest,
     EnvironmentItemResponse,
     DeploymentResponse,
     ContainerResponse,
 )
 from apps.api.app.services.audit_service import log_activity
+from apps.api.app.services.db_provision_service import (
+    provision_and_sync_project_db,
+    resolve_project_db_name,
+    ensure_postgres_database,
+    build_postgres_env_vars,
+    list_all_postgres_databases,
+)
 
 router = APIRouter(prefix="/projects", tags=["Project Management"])
 
@@ -96,13 +104,31 @@ def create_project(
     db.add(source)
     db.commit()
 
+    # Auto-provision & auto-connect PostgreSQL database for the project
+    db_info = {}
+    if getattr(payload, "auto_provision_db", True):
+        try:
+            db_info, _ = provision_and_sync_project_db(
+                db=db,
+                project=project,
+                custom_db_name=getattr(payload, "database_name", None),
+                override_existing_env=True,
+            )
+        except Exception:
+            pass
+
     log_activity(
         db,
         action="project.create",
         resource_type="project",
         resource_id=project.id,
         user_id=current_user.id,
-        details={"name": project.name, "source_type": project.source_type}
+        details={
+            "name": project.name,
+            "source_type": project.source_type,
+            "database": db_info.get("db_name"),
+            "db_auto_created": db_info.get("created", False),
+        }
     )
 
     return ProjectResponse(
@@ -285,4 +311,87 @@ def get_project_deployments(
         Deployment.project_id == project_id
     ).order_by(Deployment.created_at.desc()).all()
     return deployments
+
+
+@router.get("/databases/list")
+def get_all_postgres_databases(
+    current_user: User = Depends(get_current_user),
+):
+    """List all databases present on the PostgreSQL server."""
+    return {"databases": list_all_postgres_databases()}
+
+
+@router.get("/{project_id}/database")
+def get_project_database_info(
+    project_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Inspect the PostgreSQL database bound to this project (auto-creating if missing)."""
+    p = db.query(Project).filter(Project.id == project_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    db_name = resolve_project_db_name(p)
+    db_info = ensure_postgres_database(db_name)
+    pg_env = build_postgres_env_vars(db_info)
+
+    # Mask password in returned env preview for UI safety while providing full info
+    masked_pass = mask_secret(db_info.get("password", ""))
+    return {
+        **db_info,
+        "masked_password": masked_pass,
+        "masked_connection_url_internal": f"postgresql://{db_info['user']}:{masked_pass}@{db_info['host']}:{db_info['port']}/{db_info['db_name']}",
+        "masked_connection_url_external": f"postgresql://{db_info['user']}:{masked_pass}@{db_info['external_host']}:{db_info['port']}/{db_info['db_name']}",
+        "env_preview": {
+            k: (mask_secret(v) if "PASS" in k or "URL" in k or "URI" in k else v)
+            for k, v in pg_env.items()
+        },
+        "env_full": pg_env,
+    }
+
+
+@router.post("/{project_id}/database/provision")
+def provision_project_database_endpoint(
+    project_id: str,
+    payload: Optional[ProjectDatabaseProvisionRequest] = None,
+    current_user: User = Depends(require_role("owner", "admin", "operator")),
+    db: Session = Depends(get_db),
+):
+    """Ensure the project's PostgreSQL database exists and inject/sync connection environment variables."""
+    p = db.query(Project).filter(Project.id == project_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    custom_db = payload.db_name if payload else None
+    override = payload.override_env if payload else True
+
+    db_info, merged_env = provision_and_sync_project_db(
+        db=db,
+        project=p,
+        custom_db_name=custom_db,
+        override_existing_env=override,
+    )
+
+    log_activity(
+        db,
+        action="project.database_provision",
+        resource_type="project",
+        resource_id=project_id,
+        user_id=current_user.id,
+        details={
+            "project": p.name,
+            "db_name": db_info.get("db_name"),
+            "created": db_info.get("created"),
+            "host": db_info.get("host"),
+        },
+    )
+
+    masked_pass = mask_secret(db_info.get("password", ""))
+    return {
+        **db_info,
+        "masked_password": masked_pass,
+        "synced_env_keys": list(merged_env.keys()),
+    }
+
 

@@ -288,6 +288,25 @@ export const api = {
     return res.json();
   },
 
+  async getProjectDatabase(id: string) {
+    const res = await fetchWithAuth(`/api/v1/projects/${id}/database`);
+    return res.ok ? res.json() : null;
+  },
+
+  async provisionProjectDatabase(id: string, dbName?: string, overrideEnv = true) {
+    const res = await fetchWithAuth(`/api/v1/projects/${id}/database/provision`, {
+      method: 'POST',
+      body: JSON.stringify({ db_name: dbName || null, override_env: overrideEnv }),
+    });
+    if (!res.ok) throw new Error('Failed to provision PostgreSQL database');
+    return res.json();
+  },
+
+  async getAllPostgresDatabases() {
+    const res = await fetchWithAuth('/api/v1/projects/databases/list');
+    return res.ok ? res.json() : { databases: [] };
+  },
+
   // Deployments
   async getDeployments() {
     const res = await fetchWithAuth('/api/v1/deployments');

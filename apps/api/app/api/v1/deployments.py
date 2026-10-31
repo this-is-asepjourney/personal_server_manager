@@ -26,6 +26,7 @@ from apps.api.app.schemas.all_schemas import (
 )
 from apps.api.app.services.audit_service import log_activity
 from apps.api.app.services.job_service import create_and_dispatch_job
+from apps.api.app.services.db_provision_service import provision_and_sync_project_db
 
 router = APIRouter(prefix="/deployments", tags=["Deployment Center"])
 
@@ -103,13 +104,23 @@ async def create_git_deployment(
     db.add(initial_log)
     db.commit()
 
-    # Decrypt project environment variables to pass securely to agent
-    env_vars = {}
-    for var in project.environment_variables:
-        try:
-            env_vars[var.key] = decrypt_secret(var.encrypted_value)
-        except Exception:
-            pass
+    # Auto-provision & auto-connect PostgreSQL database for the project
+    db_info, env_vars = provision_and_sync_project_db(db, project)
+
+    db_log_msg = (
+        f"[PostgreSQL] Database '{db_info.get('db_name')}' did not exist — automatically created on {db_info.get('host')}:{db_info.get('port')} and linked to project."
+        if db_info.get("created")
+        else f"[PostgreSQL] Auto-connected project to database '{db_info.get('db_name')}' ({db_info.get('host')}:{db_info.get('port')})."
+    )
+    db.add(
+        DeploymentLog(
+            deployment_id=deployment.id,
+            sequence=2,
+            level="info",
+            message=db_log_msg,
+        )
+    )
+    db.commit()
 
     # Dispatch job to target server agent
     job_payload = {
@@ -123,7 +134,8 @@ async def create_git_deployment(
         "compose_path": src.compose_path or "docker-compose.yml",
         "image_tag": image_tag,
         "version": version,
-        "environment_variables": env_vars
+        "environment_variables": env_vars,
+        "database_config": db_info,
     }
 
     job = await create_and_dispatch_job(
@@ -238,13 +250,8 @@ async def finalize_zip_upload(
     db.add(initial_log)
     db.commit()
 
-    # Dispatch job to server agent
-    env_vars = {}
-    for var in project.environment_variables:
-        try:
-            env_vars[var.key] = decrypt_secret(var.encrypted_value)
-        except Exception:
-            pass
+    # Auto-provision & auto-connect PostgreSQL database for ZIP deployment
+    db_info, env_vars = provision_and_sync_project_db(db, project)
 
     job_payload = {
         "deployment_id": deployment.id,
@@ -255,7 +262,8 @@ async def finalize_zip_upload(
         "version": version,
         "dockerfile_path": project.source.dockerfile_path if project.source else "Dockerfile",
         "compose_path": project.source.compose_path if project.source else "docker-compose.yml",
-        "environment_variables": env_vars
+        "environment_variables": env_vars,
+        "database_config": db_info,
     }
 
     job = await create_and_dispatch_job(
@@ -351,12 +359,8 @@ async def github_webhook_trigger(
     db.add(initial_log)
     db.commit()
 
-    env_vars = {}
-    for var in project.environment_variables:
-        try:
-            env_vars[var.key] = decrypt_secret(var.encrypted_value)
-        except Exception:
-            pass
+    # Auto-provision & auto-connect PostgreSQL database for webhook deployment
+    db_info, env_vars = provision_and_sync_project_db(db, project)
 
     job_payload = {
         "deployment_id": deployment.id,
@@ -369,7 +373,8 @@ async def github_webhook_trigger(
         "compose_path": src.compose_path or "docker-compose.yml",
         "image_tag": image_tag,
         "version": version,
-        "environment_variables": env_vars
+        "environment_variables": env_vars,
+        "database_config": db_info,
     }
 
     job = await create_and_dispatch_job(

@@ -15,8 +15,12 @@ import {
   Copy,
   Check,
   GitBranch,
+  Database,
+  CheckCircle2,
+  Table,
+  HardDrive,
 } from 'lucide-react';
-import { api } from '../../../lib/api';
+import { api, formatBytes } from '../../../lib/api';
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -26,10 +30,14 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<any>(null);
   const [deployments, setDeployments] = useState<any[]>([]);
   const [envVars, setEnvVars] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'deployments' | 'environment' | 'settings'>('deployments');
+  const [dbInfo, setDbInfo] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<'overview' | 'deployments' | 'database' | 'environment' | 'settings'>('deployments');
   const [loading, setLoading] = useState(true);
   const [deploying, setDeploying] = useState(false);
+  const [provisioningDb, setProvisioningDb] = useState(false);
+  const [customDbName, setCustomDbName] = useState('');
   const [copiedWebhook, setCopiedWebhook] = useState(false);
+  const [copiedDbUrl, setCopiedDbUrl] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // New env var form
@@ -39,14 +47,19 @@ export default function ProjectDetailPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [p, d, env] = await Promise.all([
+      const [p, d, env, dbData] = await Promise.all([
         api.getProject(projectId),
         api.getDeployments().then((list) => list.filter((item: any) => item.project_id === projectId)),
         api.getProjectEnvironment(projectId),
+        api.getProjectDatabase(projectId),
       ]);
       setProject(p);
       setDeployments(d);
       setEnvVars(env);
+      setDbInfo(dbData);
+      if (dbData?.db_name && !customDbName) {
+        setCustomDbName(dbData.db_name);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -92,6 +105,19 @@ export default function ProjectDetailPage() {
     }
   };
 
+  const handleProvisionDatabase = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    try {
+      setProvisioningDb(true);
+      await api.provisionProjectDatabase(projectId, customDbName.trim() || undefined, true);
+      await loadData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to provision PostgreSQL database');
+    } finally {
+      setProvisioningDb(false);
+    }
+  };
+
   const handleAddEnvVar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newKey) return;
@@ -122,11 +148,20 @@ export default function ProjectDetailPage() {
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div>
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
               <h1 className="text-xl font-bold text-foreground">{project?.name || 'Project'}</h1>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
                 {project?.status}
               </span>
+              {dbInfo && (
+                <button
+                  onClick={() => setActiveTab('database')}
+                  className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-blue-500/10 text-blue-500 border border-blue-500/20 hover:bg-blue-500/20 transition-colors"
+                >
+                  <Database className="w-3 h-3" />
+                  <span>PG: {dbInfo.db_name}</span>
+                </button>
+              )}
             </div>
             <p className="text-xs text-gray-400 font-mono mt-0.5">
               {project?.framework} • Hosted on {project?.server_name}
@@ -165,6 +200,7 @@ export default function ProjectDetailPage() {
       <div className="flex items-center gap-2 border-b border-border text-sm overflow-x-auto pb-px">
         {[
           { key: 'deployments', label: `Deployments (${deployments.length})`, icon: Rocket },
+          { key: 'database', label: `PostgreSQL DB (${dbInfo?.db_name || 'Auto'})`, icon: Database },
           { key: 'environment', label: `Environment (${envVars.length})`, icon: Key },
           { key: 'overview', label: 'Source & Build', icon: FolderGit2 },
           { key: 'settings', label: 'Settings', icon: Settings },
@@ -268,15 +304,153 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
+      {/* Tab: PostgreSQL Database Auto-Connect & Auto-Create */}
+      {activeTab === 'database' && (
+        <div className="space-y-6">
+          <div className="rounded-xl border border-border bg-card p-5 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-sm text-foreground">PostgreSQL Auto-Connect & Auto-Provision</h3>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                        dbInfo?.connected
+                          ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                          : 'bg-blue-500/10 text-blue-500 border border-blue-500/20'
+                      }`}
+                    >
+                      {dbInfo?.connected ? 'CONNECTED & ACTIVE' : 'AUTO-PROVISION ON DEPLOY'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {dbInfo?.message || 'Setiap kali project di-deploy, PSM otomatis memeriksa database di PostgreSQL, membuatnya jika belum ada, dan menghubungkannya ke container aplikasi.'}
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleProvisionDatabase} className="flex items-center gap-2 text-xs">
+                <input
+                  type="text"
+                  value={customDbName}
+                  onChange={(e) => setCustomDbName(e.target.value)}
+                  placeholder="database_name"
+                  className="px-3 py-1.5 rounded-lg bg-background border border-border text-foreground font-mono text-xs w-40"
+                />
+                <button
+                  type="submit"
+                  disabled={provisioningDb}
+                  className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1.5 disabled:opacity-50 whitespace-nowrap"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>{provisioningDb ? 'Provisioning...' : 'Auto-Create / Sync DB'}</span>
+                </button>
+              </form>
+            </div>
+
+            {/* Connection Details Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-mono">
+              <div className="p-3.5 rounded-xl bg-background border border-border">
+                <span className="text-gray-400 font-sans block mb-1">Database Name</span>
+                <span className="text-sm font-bold text-emerald-500">{dbInfo?.db_name || 'N/A'}</span>
+              </div>
+              <div className="p-3.5 rounded-xl bg-background border border-border">
+                <span className="text-gray-400 font-sans block mb-1">Docker Network Host</span>
+                <span className="text-sm font-bold text-foreground">
+                  {dbInfo?.host || 'psm-postgres'}:{dbInfo?.port || 5432}
+                </span>
+              </div>
+              <div className="p-3.5 rounded-xl bg-background border border-border">
+                <span className="text-gray-400 font-sans block mb-1">Database User</span>
+                <span className="text-sm font-bold text-foreground">{dbInfo?.user || 'psm'}</span>
+              </div>
+              <div className="p-3.5 rounded-xl bg-background border border-border">
+                <span className="text-gray-400 font-sans block mb-1">Storage Size & Tables</span>
+                <span className="text-sm font-bold text-blue-500">
+                  {formatBytes(dbInfo?.size_bytes || 0)} • {dbInfo?.tables_count || 0} Tables
+                </span>
+              </div>
+            </div>
+
+            {/* Connection URL Copy Box */}
+            <div className="space-y-2 text-xs">
+              <label className="block text-gray-400 font-medium">
+                Auto-Injected PostgreSQL Connection URI (<code>DATABASE_URL</code>):
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={dbInfo?.masked_connection_url_internal || ''}
+                  className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs"
+                />
+                <button
+                  onClick={() => {
+                    if (dbInfo?.connection_url_internal) {
+                      navigator.clipboard.writeText(dbInfo.connection_url_internal);
+                      setCopiedDbUrl(true);
+                      setTimeout(() => setCopiedDbUrl(false), 2000);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border hover:bg-background text-foreground transition-all"
+                >
+                  {copiedDbUrl ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedDbUrl ? 'Copied Full URL' : 'Copy Full URL'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Public Schema Tables List */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-foreground flex items-center gap-1.5">
+                  <Table className="w-3.5 h-3.5 text-blue-500" />
+                  <span>Tables in Database &apos;{dbInfo?.db_name}&apos; ({dbInfo?.tables?.length || 0})</span>
+                </span>
+              </div>
+              {dbInfo?.tables && dbInfo.tables.length > 0 ? (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {dbInfo.tables.map((tbl: string) => (
+                    <span
+                      key={tbl}
+                      className="px-2.5 py-1 rounded-lg bg-background border border-border font-mono text-xs text-foreground"
+                    >
+                      {tbl}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-4 rounded-lg bg-background border border-border text-xs text-gray-400">
+                  Database <code>{dbInfo?.db_name}</code> sudah siap digunakan. Tabel akan otomatis dibuat saat aplikasi menjalankan migrasi saat deploy (misalnya <code>php artisan migrate --force</code>, Prisma, atau SQLAlchemy).
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tab: Environment Variables */}
       {activeTab === 'environment' && (
         <div className="space-y-6">
           <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-            <div>
-              <h3 className="font-bold text-sm text-foreground">Encrypted Environment Secrets</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Variables are encrypted at rest with AES-Fernet encryption before storage in PostgreSQL.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="font-bold text-sm text-foreground">Encrypted Environment Secrets</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Variables are encrypted at rest with AES-Fernet encryption and merged with PostgreSQL auto-connect credentials during deployment.
+                </p>
+              </div>
+              <button
+                onClick={() => handleProvisionDatabase()}
+                disabled={provisioningDb}
+                className="px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 text-xs font-medium flex items-center gap-1.5 self-start"
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>Sync PostgreSQL Env Vars</span>
+              </button>
             </div>
 
             {/* List */}
@@ -391,7 +565,7 @@ export default function ProjectDetailPage() {
                 <li>Tempel (Paste) URL di atas ke dalam kolom <strong>Payload URL</strong>.</li>
                 <li>Pilih Content type: <code>application/json</code>.</li>
                 <li>Pilih <em>&quot;Just the push event&quot;</em> lalu klik <strong>Add webhook</strong>.</li>
-                <li>Selesai! Setiap Anda <code>git push</code>, PSM otomatis meng-clone, mem-build, dan me-restart container Docker aplikasi Anda.</li>
+                <li>Selesai! Setiap Anda <code>git push</code>, PSM otomatis meng-clone, mem-build, membuat/menghubungkan database PostgreSQL, dan me-restart container Docker aplikasi Anda.</li>
               </ol>
             </div>
           </div>

@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Trash2,
   Upload,
+  Database,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 
@@ -29,6 +30,8 @@ export default function ProjectsPage() {
   const [repositoryUrl, setRepositoryUrl] = useState('');
   const [branch, setBranch] = useState('main');
   const [zipFile, setZipFile] = useState<File | null>(null);
+  const [autoProvisionDb, setAutoProvisionDb] = useState(true);
+  const [customDbName, setCustomDbName] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const loadData = async () => {
@@ -52,6 +55,13 @@ export default function ProjectsPage() {
     loadData();
   }, []);
 
+  const derivedDbSlug = (customDbName || name || 'my_project')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '') || 'psm_app_db';
+
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !serverId) return;
@@ -64,6 +74,8 @@ export default function ProjectsPage() {
         source_type: sourceType,
         repository_url: repositoryUrl || null,
         branch,
+        auto_provision_db: autoProvisionDb,
+        database_name: customDbName.trim() || null,
       });
 
       // If user provided zip right away
@@ -74,6 +86,7 @@ export default function ProjectsPage() {
       setModalOpen(false);
       setName('');
       setRepositoryUrl('');
+      setCustomDbName('');
       setZipFile(null);
       loadData();
     } catch (err: any) {
@@ -100,7 +113,7 @@ export default function ProjectsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Project Management</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Deploy apps to servers via Git repository or direct ZIP archives.
+            Deploy apps to servers via Git repository or direct ZIP archives with automatic PostgreSQL database provisioning.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -123,69 +136,80 @@ export default function ProjectsPage() {
 
       {/* Projects Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {projects.map((p) => (
-          <div
-            key={p.id}
-            className="rounded-xl border border-border bg-card p-5 shadow-sm hover:border-blue-500/40 transition-all flex flex-col justify-between"
-          >
-            <div>
-              <div className="flex items-start justify-between gap-2 mb-3">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-500">
-                    <FolderGit2 className="w-5 h-5" />
+        {projects.map((p) => {
+          const dbSlug = (p.name || 'app')
+            .toLowerCase()
+            .replace(/[^a-z0-9_]/g, '_')
+            .replace(/_+/g, '_')
+            .replace(/^_|_$/g, '');
+          return (
+            <div
+              key={p.id}
+              className="rounded-xl border border-border bg-card p-5 shadow-sm hover:border-blue-500/40 transition-all flex flex-col justify-between"
+            >
+              <div>
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-500">
+                      <FolderGit2 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <Link
+                        href={`/projects/${p.id}`}
+                        className="font-semibold text-sm text-foreground hover:text-blue-500 transition-colors"
+                      >
+                        {p.name}
+                      </Link>
+                      <p className="text-xs text-gray-400 font-mono mt-0.5">{p.framework}</p>
+                    </div>
                   </div>
-                  <div>
-                    <Link
-                      href={`/projects/${p.id}`}
-                      className="font-semibold text-sm text-foreground hover:text-blue-500 transition-colors"
-                    >
-                      {p.name}
-                    </Link>
-                    <p className="text-xs text-gray-400 font-mono mt-0.5">{p.framework}</p>
-                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                    {p.status}
+                  </span>
                 </div>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                  {p.status}
-                </span>
-              </div>
 
-              <div className="space-y-1.5 text-xs text-gray-400 py-3 border-t border-border">
-                <div className="flex items-center gap-1.5">
-                  <Server className="w-3.5 h-3.5 text-gray-500" />
-                  <span>Target: <span className="text-foreground font-medium">{p.server_name}</span></span>
-                </div>
-                {p.repository_url ? (
-                  <div className="flex items-center gap-1.5 font-mono truncate">
-                    <GitBranch className="w-3.5 h-3.5 text-gray-500 shrink-0" />
-                    <span className="truncate">{p.branch || 'main'}</span>
-                  </div>
-                ) : (
+                <div className="space-y-1.5 text-xs text-gray-400 py-3 border-t border-border">
                   <div className="flex items-center gap-1.5">
-                    <Upload className="w-3.5 h-3.5 text-gray-500" />
-                    <span>Source: Uploaded ZIP</span>
+                    <Server className="w-3.5 h-3.5 text-gray-500" />
+                    <span>Target: <span className="text-foreground font-medium">{p.server_name}</span></span>
                   </div>
-                )}
+                  {p.repository_url ? (
+                    <div className="flex items-center gap-1.5 font-mono truncate">
+                      <GitBranch className="w-3.5 h-3.5 text-gray-500 shrink-0" />
+                      <span className="truncate">{p.branch || 'main'}</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <Upload className="w-3.5 h-3.5 text-gray-500" />
+                      <span>Source: Uploaded ZIP</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1.5 pt-1 text-emerald-500 font-mono text-[11px]">
+                    <Database className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">PostgreSQL Auto-DB: {dbSlug}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-border flex items-center justify-between">
+                <Link
+                  href={`/projects/${p.id}`}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600/10 hover:bg-blue-600/20 text-blue-600 dark:text-blue-400 text-xs font-medium transition-colors"
+                >
+                  <Rocket className="w-3 h-3" />
+                  <span>Deploy / Manage</span>
+                </Link>
+                <button
+                  onClick={() => handleDelete(p.id, p.name)}
+                  className="p-1.5 text-gray-400 hover:text-rose-500 hover:bg-rose-500/10 rounded transition-colors"
+                  title="Delete project"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             </div>
-
-            <div className="mt-4 pt-3 border-t border-border flex items-center justify-between">
-              <Link
-                href={`/projects/${p.id}`}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600/10 hover:bg-blue-600/20 text-blue-600 dark:text-blue-400 text-xs font-medium transition-colors"
-              >
-                <Rocket className="w-3 h-3" />
-                <span>Deploy / Manage</span>
-              </Link>
-              <button
-                onClick={() => handleDelete(p.id, p.name)}
-                className="p-1.5 text-gray-400 hover:text-rose-500 hover:bg-rose-500/10 rounded transition-colors"
-                title="Delete project"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* New Project Modal */}
@@ -211,7 +235,7 @@ export default function ProjectsPage() {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. backend-api, my-blog"
+                  placeholder="e.g. Stock-UMKM, backend-api"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -242,10 +266,10 @@ export default function ProjectsPage() {
                     className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground text-sm"
                   >
                     <option value="Next.js">Next.js</option>
+                    <option value="Laravel">Laravel</option>
                     <option value="FastAPI">FastAPI</option>
                     <option value="Docker Compose">Docker Compose</option>
                     <option value="Node.js">Node.js</option>
-                    <option value="Laravel">Laravel</option>
                   </select>
                 </div>
 
@@ -297,6 +321,39 @@ export default function ProjectsPage() {
                 </div>
               )}
 
+              {/* PostgreSQL Auto-Connect & Auto-Create Option */}
+              <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-2.5">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoProvisionDb}
+                    onChange={(e) => setAutoProvisionDb(e.target.checked)}
+                    className="rounded border-border text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <div className="flex items-center gap-1.5 font-semibold text-foreground">
+                    <Database className="w-4 h-4 text-emerald-500" />
+                    <span>Auto-Connect & Auto-Create PostgreSQL Database</span>
+                  </div>
+                </label>
+                {autoProvisionDb && (
+                  <div className="pl-6 space-y-1.5">
+                    <p className="text-[11px] text-gray-400">
+                      Otomatis membuat database jika belum ada di PostgreSQL dan menginjeksi variabel koneksi (<code>DATABASE_URL</code>, <code>DB_CONNECTION=pgsql</code>, <code>DB_HOST</code>, dll.) saat deploy.
+                    </p>
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-1">Database Name (opsional):</label>
+                      <input
+                        type="text"
+                        placeholder={derivedDbSlug}
+                        value={customDbName}
+                        onChange={(e) => setCustomDbName(e.target.value)}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-background border border-border text-foreground font-mono text-xs"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex justify-end gap-3 pt-3 border-t border-border">
                 <button
                   type="button"
@@ -320,4 +377,3 @@ export default function ProjectsPage() {
     </div>
   );
 }
-

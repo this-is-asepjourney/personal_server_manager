@@ -386,3 +386,58 @@ def test_prometheus_storage_and_network_endpoints(client):
     assert "connection_stats" in net_data
 
 
+def test_project_postgres_auto_provision(client):
+    token = get_auth_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    servers = client.get("/api/v1/servers", headers=headers).json()
+    server_id = servers[0]["id"]
+
+    # Create project with auto PostgreSQL provisioning
+    proj_res = client.post(
+        "/api/v1/projects",
+        json={
+            "server_id": server_id,
+            "name": "Stock-UMKM",
+            "framework": "Laravel",
+            "source_type": "git",
+            "repository_url": "https://github.com/this-is-asepjourney/stock_umkm",
+            "branch": "main",
+            "auto_provision_db": True,
+        },
+        headers=headers,
+    )
+    assert proj_res.status_code == 200
+    proj = proj_res.json()
+    project_id = proj["id"]
+
+    # Check project database endpoint
+    db_res = client.get(f"/api/v1/projects/{project_id}/database", headers=headers)
+    assert db_res.status_code == 200
+    db_data = db_res.json()
+    assert db_data["db_name"] == "stock_umkm"
+    assert "connection_url_internal" in db_data
+    assert "env_full" in db_data
+    assert db_data["env_full"]["DB_CONNECTION"] == "pgsql"
+    assert db_data["env_full"]["DB_DATABASE"] == "stock_umkm"
+
+    # Trigger manual database provision with custom name
+    prov_res = client.post(
+        f"/api/v1/projects/{project_id}/database/provision",
+        json={"db_name": "stock_umkm_prod", "override_env": True},
+        headers=headers,
+    )
+    assert prov_res.status_code == 200
+    prov_data = prov_res.json()
+    assert prov_data["db_name"] == "stock_umkm_prod"
+    assert "DATABASE_URL" in prov_data["synced_env_keys"]
+
+    # Verify project environment variables were automatically populated
+    env_res = client.get(f"/api/v1/projects/{project_id}/environment", headers=headers)
+    assert env_res.status_code == 200
+    env_keys = [item["key"] for item in env_res.json()]
+    assert "DATABASE_URL" in env_keys
+    assert "DB_CONNECTION" in env_keys
+    assert "POSTGRES_DB" in env_keys
+
+
+

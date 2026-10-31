@@ -74,6 +74,7 @@ def handle_deployment_git(payload: Dict[str, Any], log_cb: Callable) -> Dict[str
     dockerfile_path = payload.get("dockerfile_path", "Dockerfile")
     image_tag = payload.get("image_tag", f"{project_name}:latest")
     env_vars = payload.get("environment_variables", {})
+    db_config = payload.get("database_config", {})
 
     target_dir = os.path.join(agent_settings.WORKSPACE_DIR, project_id)
     log_cb("info", f"[Deploy] Starting Git deployment for project '{project_name}'...")
@@ -83,10 +84,10 @@ def handle_deployment_git(payload: Dict[str, Any], log_cb: Callable) -> Dict[str
     if not cloned:
         raise RuntimeError("Failed to clone or pull git repository")
 
-    # 2. Write project environment secrets into .env file
-    if env_vars:
-        log_cb("info", f"[Deploy] Injecting {len(env_vars)} environment secret(s) into .env...")
-        DeploymentEngine.write_env_file(target_dir, env_vars)
+    # 2. Ensure PostgreSQL database exists & auto-connect environment secrets
+    merged_env = DeploymentEngine.ensure_project_postgres_db(project_name, env_vars, db_config, log_cb)
+    log_cb("info", f"[Deploy] Injecting {len(merged_env)} environment & PostgreSQL connection variable(s) into .env...")
+    DeploymentEngine.write_env_file(target_dir, merged_env)
 
     # 3. Check for Compose vs Dockerfile
     deployed = False
@@ -132,15 +133,16 @@ def handle_deployment_zip(payload: Dict[str, Any], log_cb: Callable) -> Dict[str
     dockerfile_path = payload.get("dockerfile_path", "Dockerfile")
     compose_path = payload.get("compose_path", "docker-compose.yml")
     env_vars = payload.get("environment_variables", {})
+    db_config = payload.get("database_config", {})
 
     target_dir = os.path.join(agent_settings.WORKSPACE_DIR, project_id)
 
     log_cb("info", f"[Deploy] Extracting ZIP package into workspace {target_dir}...")
     DeploymentEngine.safe_extract_zip(zip_path, target_dir)
 
-    if env_vars:
-        log_cb("info", f"[Deploy] Injecting {len(env_vars)} environment secret(s) into .env...")
-        DeploymentEngine.write_env_file(target_dir, env_vars)
+    merged_env = DeploymentEngine.ensure_project_postgres_db(project_name, env_vars, db_config, log_cb)
+    log_cb("info", f"[Deploy] Injecting {len(merged_env)} environment & PostgreSQL connection variable(s) into .env...")
+    DeploymentEngine.write_env_file(target_dir, merged_env)
 
     has_compose = os.path.exists(os.path.join(target_dir, compose_path))
     if has_compose:
