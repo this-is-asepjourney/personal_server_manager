@@ -43,9 +43,9 @@ def parse_database_url_Config() -> Dict[str, Any]:
         except Exception:
             pass
 
-    user = os.getenv("POSTGRES_USER") or parsed_user or "psm"
-    password = os.getenv("POSTGRES_PASSWORD") or parsed_pass or "psm_super_secret_password_change_in_production"
-    configured_host = os.getenv("POSTGRES_HOST") or parsed_host or "postgres"
+    user = os.getenv("POSTGRES_USER") or parsed_user or settings.POSTGRES_USER or "appuser"
+    password = os.getenv("POSTGRES_PASSWORD") or parsed_pass or settings.POSTGRES_PASSWORD or "admin12345"
+    configured_host = os.getenv("POSTGRES_HOST") or parsed_host or settings.POSTGRES_HOST or "100.106.63.90"
     port = int(os.getenv("POSTGRES_PORT") or parsed_port or 5432)
     default_db = os.getenv("POSTGRES_DB") or parsed_db or "psm"
 

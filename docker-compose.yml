@@ -23,16 +23,18 @@ services:
       dockerfile: infrastructure/docker/Dockerfile.api
     container_name: psm-api
     restart: unless-stopped
+    env_file:
+      - .env.example
     ports:
       - "${API_PORT:-8000}:8000"
     environment:
-      # Built from POSTGRES_* and automatically creates database if missing.
-      - DATABASE_URL=${PSM_DATABASE_URL:-postgresql+psycopg2://${POSTGRES_USER:-psm}:${POSTGRES_PASSWORD:-psm_super_secret_password_change_in_production}@postgres:5432/${POSTGRES_DB:-psm}}
+      # Connects to PostgreSQL (100.106.63.90:5432 / psm-postgres) as appuser and auto-creates database 'psm' if missing.
       - POSTGRES_DB=${POSTGRES_DB:-psm}
-      - POSTGRES_USER=${POSTGRES_USER:-psm}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-psm_super_secret_password_change_in_production}
-      - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
+      - POSTGRES_USER=${POSTGRES_USER:-appuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-admin12345}
+      - POSTGRES_HOST=${POSTGRES_HOST:-100.106.63.90}
       - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - DATABASE_URL=${PSM_DATABASE_URL:-postgresql+psycopg2://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-admin12345}@${POSTGRES_HOST:-100.106.63.90}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-psm}}
       - STORAGE_BASE_DIR=/opt/psm
       - UPLOAD_DIR=/opt/psm/uploads
       - RELEASE_DIR=/opt/psm/releases
@@ -62,15 +64,17 @@ services:
       dockerfile: infrastructure/docker/Dockerfile.agent
     container_name: psm-agent
     restart: unless-stopped
+    env_file:
+      - .env.example
     environment:
       - SERVER_ID=homelab-primary
       - AGENT_TOKEN=${HOMELAB_AGENT_TOKEN:-psm_agent_homelab_default_token}
       - CONTROL_PLANE_URL=http://api:8000
       - PSM_BASE_DIR=/opt/psm
       - POSTGRES_DB=${POSTGRES_DB:-psm}
-      - POSTGRES_USER=${POSTGRES_USER:-psm}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-psm_super_secret_password_change_in_production}
-      - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
+      - POSTGRES_USER=${POSTGRES_USER:-appuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-admin12345}
+      - POSTGRES_HOST=${POSTGRES_HOST:-100.106.63.90}
       - POSTGRES_PORT=${POSTGRES_PORT:-5432}
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -87,14 +91,16 @@ services:
     image: postgres:17-alpine
     container_name: psm-postgres
     restart: unless-stopped
+    env_file:
+      - .env.example
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-psm}
-      POSTGRES_USER: ${POSTGRES_USER:-psm}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-psm_super_secret_password_change_in_production}
+      POSTGRES_USER: ${POSTGRES_USER:-appuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin12345}
     volumes:
       - psm-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-appuser} -d $${POSTGRES_DB:-psm} || pg_isready -U psm -d psm"]
       interval: 5s
       timeout: 5s
       retries: 5

@@ -4,32 +4,38 @@ from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from apps.api.app.core.config import settings
 from apps.api.app.core.security import hash_password, hash_token
-from apps.api.app.database.session import engine, Base, SessionLocal
+import apps.api.app.database.session as db_session
+from apps.api.app.database.session import engine, Base, SessionLocal, _auto_ensure_psm_postgres_db, ACTIVE_PSM_DB_INFO
 from apps.api.app.models.entities import User, Server, AgentToken, Container, ServerMetric, Project, ProjectSource
 from apps.api.app.api.v1.router import api_router
 from apps.api.app.websocket.handlers import ws_router
 
 def _wait_for_database(max_attempts: int = 15, delay: float = 2.0):
-    """Retry DB connection on startup and print a clear diagnostic on failure."""
+    """Ensure PostgreSQL database 'psm' exists (creating it if missing) and retry DB connection on startup."""
     import time
-    from sqlalchemy import text
+    from sqlalchemy import text, create_engine
     last_err = None
     for attempt in range(1, max_attempts + 1):
         try:
-            with engine.connect() as conn:
+            with db_session.engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
             return
         except Exception as e:  # noqa: BLE001
             last_err = e
-            safe_url = engine.url.render_as_string(hide_password=True)
-            print(f"[PSM] Database not reachable ({safe_url}) attempt {attempt}/{max_attempts}: {e.__class__.__name__}: {e}", flush=True)
+            safe_url = db_session.engine.url.render_as_string(hide_password=True)
+            print(f"[PSM] Database check ({safe_url}) attempt {attempt}/{max_attempts}: {e.__class__.__name__}: {e}", flush=True)
+            # Re-run auto-create & auto-resolve for PostgreSQL database 'psm'
+            new_url = _auto_ensure_psm_postgres_db(settings.DATABASE_URL)
+            if new_url and not new_url.startswith("sqlite"):
+                db_session.engine = create_engine(new_url, pool_pre_ping=True)
+                db_session.SessionLocal.configure(bind=db_session.engine)
             time.sleep(delay)
     raise RuntimeError(f"Could not connect to database: {last_err}")
 
 def init_db():
     _wait_for_database()
-    Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
+    Base.metadata.create_all(bind=db_session.engine)
+    db = db_session.SessionLocal()
     try:
         # Seed default admin user
         admin = db.query(User).filter(User.email == "admin@psm.local").first()
@@ -200,7 +206,8 @@ def health_check():
     return {
         "status": "healthy",
         "service": "PSM Control Plane API",
-        "version": settings.VERSION
+        "version": settings.VERSION,
+        "database": ACTIVE_PSM_DB_INFO,
     }
 
 @app.get("/metrics")
