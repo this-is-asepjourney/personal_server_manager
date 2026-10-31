@@ -8,6 +8,10 @@ import {
   Plus,
   Trash2,
   Users,
+  Bell,
+  BellRing,
+  Send,
+  CheckCircle2,
 } from 'lucide-react';
 import { useTheme } from '../../components/theme-provider';
 import { api } from '../../lib/api';
@@ -26,6 +30,22 @@ export default function SettingsPage() {
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newRole, setNewRole] = useState('operator');
 
+  // Notification & Alerting state
+  const [notifConfig, setNotifConfig] = useState<any>({
+    enabled: false,
+    discord_webhook_url: '',
+    telegram_bot_token: '',
+    telegram_chat_id: '',
+    cpu_threshold: 90,
+    memory_threshold: 90,
+    disk_threshold: 90,
+    notify_server_offline: true,
+    notify_deployments: true,
+  });
+  const [notifSaved, setNotifSaved] = useState(false);
+  const [testingNotif, setTestingNotif] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+
   const loadUsers = async () => {
     try {
       const list = await api.getUsers();
@@ -33,10 +53,46 @@ export default function SettingsPage() {
     } catch (_) {}
   };
 
+  const loadNotifications = async () => {
+    try {
+      const data = await api.getNotificationSettings();
+      if (data) setNotifConfig(data);
+    } catch (_) {}
+  };
+
   useEffect(() => {
     api.me().then((u) => setCurrentUser(u)).catch(() => {});
     loadUsers();
+    loadNotifications();
   }, []);
+
+  const handleSaveNotifications = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await api.updateNotificationSettings(notifConfig);
+      setNotifSaved(true);
+      setTimeout(() => setNotifSaved(false), 3000);
+    } catch (err: any) {
+      alert(err.message || 'Failed to save notification settings');
+    }
+  };
+
+  const handleTestNotification = async () => {
+    try {
+      setTestingNotif(true);
+      setTestResult(null);
+      const res = await api.testNotification();
+      setTestResult(
+        `Test dispatched. Discord: ${res.results?.discord ? 'Delivered' : 'Not configured or failed'}, Telegram: ${
+          res.results?.telegram ? 'Delivered' : 'Not configured or failed'
+        }`
+      );
+    } catch (err: any) {
+      setTestResult(err.message || 'Notification test failed');
+    } finally {
+      setTestingNotif(false);
+    }
+  };
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -284,6 +340,138 @@ export default function SettingsPage() {
             <Plus className="w-3.5 h-3.5" />
             <span>Add User</span>
           </button>
+        </form>
+      </div>
+
+      {/* External Notifications & Alerting (Discord & Telegram) */}
+      <div className="p-6 rounded-xl border border-border bg-card shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <BellRing className="w-4 h-4 text-amber-500" />
+            <div>
+              <h3 className="font-bold text-sm text-foreground">External Alerts & Webhooks (Discord & Telegram)</h3>
+              <p className="text-xs text-gray-500">
+                Receive proactive alerts on Discord channel or Telegram chat when servers exceed resource limits.
+              </p>
+            </div>
+          </div>
+          {notifSaved && (
+            <span className="flex items-center gap-1 text-emerald-500 text-xs font-medium">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Saved
+            </span>
+          )}
+        </div>
+
+        <form onSubmit={handleSaveNotifications} className="space-y-4 text-xs">
+          <div className="flex items-center gap-2 pt-1">
+            <input
+              type="checkbox"
+              id="notif_enabled"
+              checked={notifConfig.enabled}
+              onChange={(e) => setNotifConfig({ ...notifConfig, enabled: e.target.checked })}
+              className="rounded border-border text-blue-600 focus:ring-blue-500"
+            />
+            <label htmlFor="notif_enabled" className="text-foreground font-semibold cursor-pointer">
+              Enable Proactive Webhook Alerts
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-gray-400 font-medium mb-1">Discord Webhook URL</label>
+              <input
+                type="text"
+                placeholder="https://discord.com/api/webhooks/..."
+                value={notifConfig.discord_webhook_url}
+                onChange={(e) => setNotifConfig({ ...notifConfig, discord_webhook_url: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-[11px]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-gray-400 font-medium mb-1">Telegram Bot Token</label>
+              <input
+                type="text"
+                placeholder="123456789:ABCdefGhIJKlmNoPQRstuVWXyz..."
+                value={notifConfig.telegram_bot_token}
+                onChange={(e) => setNotifConfig({ ...notifConfig, telegram_bot_token: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-[11px]"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-gray-400 font-medium mb-1">Telegram Chat ID / Group ID</label>
+              <input
+                type="text"
+                placeholder="e.g. -100123456789 or 98765432"
+                value={notifConfig.telegram_chat_id}
+                onChange={(e) => setNotifConfig({ ...notifConfig, telegram_chat_id: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-[11px]"
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block text-gray-400 font-medium mb-1">CPU Max %</label>
+                <input
+                  type="number"
+                  min="50"
+                  max="99"
+                  value={notifConfig.cpu_threshold}
+                  onChange={(e) => setNotifConfig({ ...notifConfig, cpu_threshold: parseFloat(e.target.value) || 90 })}
+                  className="w-full px-2.5 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-[11px]"
+                />
+              </div>
+              <div>
+                <label className="block text-gray-400 font-medium mb-1">RAM Max %</label>
+                <input
+                  type="number"
+                  min="50"
+                  max="99"
+                  value={notifConfig.memory_threshold}
+                  onChange={(e) => setNotifConfig({ ...notifConfig, memory_threshold: parseFloat(e.target.value) || 90 })}
+                  className="w-full px-2.5 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-[11px]"
+                />
+              </div>
+              <div>
+                <label className="block text-gray-400 font-medium mb-1">Disk Max %</label>
+                <input
+                  type="number"
+                  min="50"
+                  max="99"
+                  value={notifConfig.disk_threshold}
+                  onChange={(e) => setNotifConfig({ ...notifConfig, disk_threshold: parseFloat(e.target.value) || 90 })}
+                  className="w-full px-2.5 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-[11px]"
+                />
+              </div>
+            </div>
+          </div>
+
+          {testResult && (
+            <div className="p-2.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-mono">
+              {testResult}
+            </div>
+          )}
+
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              type="submit"
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium"
+            >
+              Save Alert Settings
+            </button>
+            <button
+              type="button"
+              onClick={handleTestNotification}
+              disabled={testingNotif}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-border hover:bg-background text-foreground font-medium disabled:opacity-50"
+            >
+              <Send className="w-3.5 h-3.5 text-blue-400" />
+              <span>{testingNotif ? 'Sending Test...' : 'Send Test Alert Notification'}</span>
+            </button>
+          </div>
         </form>
       </div>
 

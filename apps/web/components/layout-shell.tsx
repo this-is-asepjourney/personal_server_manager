@@ -20,6 +20,9 @@ import {
   ShieldCheck,
   ChevronRight,
   Terminal,
+  Boxes,
+  Bell,
+  AlertTriangle,
 } from 'lucide-react';
 import { useTheme } from './theme-provider';
 import { api, getAuthToken } from '../lib/api';
@@ -33,6 +36,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Servers', href: '/servers', icon: Server },
+  { name: 'App Store', href: '/templates', icon: Boxes },
   { name: 'Projects', href: '/projects', icon: FolderGit2 },
   { name: 'Deployments', href: '/deployments', icon: Rocket },
   { name: 'Monitoring', href: '/monitoring', icon: Activity },
@@ -47,6 +51,8 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   const { theme, resolvedTheme, setTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [alertsOpen, setAlertsOpen] = useState(false);
 
   useEffect(() => {
     // If on login page, don't show shell
@@ -70,6 +76,11 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       .catch(() => {
         // Continue with local user or login redirect
       });
+
+    // Load recent alerts
+    api.getRecentAlerts()
+      .then((a) => setAlerts(a))
+      .catch(() => {});
   }, [pathname, router]);
 
   if (pathname === '/login') {
@@ -184,6 +195,61 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-medium">
               <ShieldCheck className="w-3.5 h-3.5" />
               <span>Control Plane Active</span>
+            </div>
+
+            {/* Alerts & Notifications Bell */}
+            <div className="relative">
+              <button
+                onClick={() => setAlertsOpen(!alertsOpen)}
+                className="relative p-2 rounded-lg border border-border text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                title="System Alerts"
+              >
+                <Bell className="w-4 h-4" />
+                {alerts.length > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] font-bold text-white shadow-sm">
+                    {alerts.length > 9 ? '9+' : alerts.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Alerts Dropdown */}
+              {alertsOpen && (
+                <div className="absolute right-0 mt-2 w-80 rounded-xl border border-border bg-card shadow-2xl overflow-hidden z-50 text-xs">
+                  <div className="flex items-center justify-between p-3 border-b border-border bg-background/60">
+                    <span className="font-bold text-foreground">Notifications & Alerts</span>
+                    {alerts.length > 0 && (
+                      <button
+                        onClick={async () => {
+                          await api.clearAlerts();
+                          setAlerts([]);
+                        }}
+                        className="text-[11px] text-blue-500 hover:underline"
+                      >
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-72 overflow-y-auto divide-y divide-border">
+                    {alerts.length === 0 ? (
+                      <div className="p-4 text-center text-gray-500 text-xs">
+                        No active system alerts. All nodes healthy!
+                      </div>
+                    ) : (
+                      alerts.map((alt) => (
+                        <div key={alt.id} className="p-3 hover:bg-gray-500/5 transition-colors space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-foreground truncate">{alt.title}</span>
+                            <span className="text-[10px] text-gray-400 font-mono">
+                              {new Date(alt.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-400 line-clamp-2">{alt.description}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Theme Toggle Button */}

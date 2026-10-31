@@ -380,4 +380,99 @@ export const api = {
     const res = await fetchWithAuth('/api/v1/audit-logs');
     return res.ok ? res.json() : [];
   },
+
+  async exportAuditLogs(format: 'csv' | 'json' = 'csv') {
+    const res = await fetchWithAuth(`/api/v1/audit-logs/export?format=${format}`);
+    if (!res.ok) throw new Error('Failed to export audit logs');
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `psm_audit_logs_${new Date().toISOString().slice(0, 10)}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  // Templates & App Store
+  async getTemplates() {
+    const res = await fetchWithAuth('/api/v1/templates');
+    return res.ok ? res.json() : [];
+  },
+
+  async deployTemplate(data: {
+    server_id: string;
+    template_id: string;
+    project_name: string;
+    port?: number;
+    environment_variables?: Record<string, string>;
+  }) {
+    const res = await fetchWithAuth('/api/v1/templates/deploy', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Template deployment failed' }));
+      throw new Error(err.detail || 'Template deployment failed');
+    }
+    return res.json();
+  },
+
+  // Container Inspection
+  async inspectContainer(serverId: string, cid: string) {
+    const res = await fetchWithAuth(`/api/v1/servers/${serverId}/containers/${cid}/inspect`);
+    if (!res.ok) throw new Error('Failed to inspect container');
+    return res.json();
+  },
+
+  // Notifications & Alerts
+  async getNotificationSettings() {
+    const res = await fetchWithAuth('/api/v1/notifications/settings');
+    return res.ok ? res.json() : null;
+  },
+
+  async updateNotificationSettings(data: any) {
+    const res = await fetchWithAuth('/api/v1/notifications/settings', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error('Failed to update notification settings');
+    return res.json();
+  },
+
+  async testNotification() {
+    const res = await fetchWithAuth('/api/v1/notifications/test', {
+      method: 'POST',
+    });
+    if (!res.ok) throw new Error('Notification test failed');
+    return res.json();
+  },
+
+  async getRecentAlerts() {
+    const res = await fetchWithAuth('/api/v1/notifications/alerts');
+    return res.ok ? res.json() : [];
+  },
+
+  async clearAlerts() {
+    const res = await fetchWithAuth('/api/v1/notifications/alerts/clear', {
+      method: 'POST',
+    });
+    return res.ok ? res.json() : null;
+  },
+
+  // Backup file download
+  async downloadBackup(backupId: string, filename: string) {
+    const res = await fetchWithAuth(`/api/v1/backups/${backupId}/download`);
+    if (!res.ok) throw new Error('Failed to download backup snapshot');
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || `psm_backup_${backupId}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
 };

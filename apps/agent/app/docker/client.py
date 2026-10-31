@@ -198,6 +198,63 @@ class DockerManager:
         except Exception as e:
             return {"success": False, "output": f"Prune failed: {e}"}
 
+    def inspect_container(self, container_id: str) -> Dict[str, Any]:
+        """Inspect container configuration, networking, mounts, and health."""
+        if not self.is_available():
+            return {}
+        try:
+            cmd = ["docker", "inspect", container_id]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
+            if res.returncode == 0:
+                data = json.loads(res.stdout)
+                if data and len(data) > 0:
+                    info = data[0]
+                    # Filter sensitive environment variables
+                    safe_envs = []
+                    for env_line in info.get("Config", {}).get("Env", []):
+                        parts = env_line.split("=", 1)
+                        k = parts[0]
+                        v = parts[1] if len(parts) > 1 else ""
+                        if any(s in k.upper() for s in ["PASS", "SECRET", "KEY", "TOKEN", "AUTH"]):
+                            safe_envs.append(f"{k}=********")
+                        else:
+                            safe_envs.append(f"{k}={v}")
+
+                    net_settings = info.get("NetworkSettings", {})
+                    networks = {}
+                    for net_name, net_data in net_settings.get("Networks", {}).items():
+                        networks[net_name] = {
+                            "ip_address": net_data.get("IPAddress", ""),
+                            "gateway": net_data.get("Gateway", ""),
+                            "mac_address": net_data.get("MacAddress", "")
+                        }
+
+                    return {
+                        "id": info.get("Id", "")[:12],
+                        "name": info.get("Name", "").lstrip("/"),
+                        "created": info.get("Created", ""),
+                        "state": info.get("State", {}),
+                        "image": info.get("Config", {}).get("Image", ""),
+                        "cmd": info.get("Config", {}).get("Cmd", []),
+                        "env": safe_envs,
+                        "networks": networks,
+                        "ip_address": net_settings.get("IPAddress", ""),
+                        "ports": net_settings.get("Ports", {}),
+                        "mounts": [
+                            {
+                                "type": m.get("Type", ""),
+                                "source": m.get("Source", ""),
+                                "destination": m.get("Destination", ""),
+                                "mode": m.get("Mode", "")
+                            }
+                            for m in info.get("Mounts", [])
+                        ],
+                        "restart_policy": info.get("HostConfig", {}).get("RestartPolicy", {}),
+                    }
+        except Exception as e:
+            logger.warning(f"Failed to inspect container {container_id}: {e}")
+        return {}
+
     def get_all_container_stats(self) -> List[Dict[str, Any]]:
         """Collect live CPU and Memory statistics for all running containers."""
         if not self.is_available():

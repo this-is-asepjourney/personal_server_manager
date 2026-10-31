@@ -227,3 +227,117 @@ def test_docker_prune_and_github_webhook(client):
     )
     assert wh_res.status_code == 200
     assert wh_res.json()["status"] == "triggered"
+
+def test_templates_catalog_and_deploy(client):
+    token = get_auth_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. List templates
+    res = client.get("/api/v1/templates", headers=headers)
+    assert res.status_code == 200
+    templates = res.json()
+    assert len(templates) >= 6
+    template_ids = [t["id"] for t in templates]
+    assert "vaultwarden" in template_ids
+    assert "adguard-home" in template_ids
+    assert "redis" in template_ids
+
+    # 2. Get specific template
+    vw = client.get("/api/v1/templates/vaultwarden", headers=headers)
+    assert vw.status_code == 200
+    assert vw.json()["name"] == "Vaultwarden"
+
+    # 3. Deploy template
+    servers = client.get("/api/v1/servers", headers=headers).json()
+    server_id = servers[0]["id"]
+    deploy_res = client.post(
+        "/api/v1/templates/deploy",
+        json={
+            "server_id": server_id,
+            "template_id": "redis",
+            "project_name": "Homelab-Cache",
+            "port": 6380
+        },
+        headers=headers
+    )
+    assert deploy_res.status_code == 200
+    data = deploy_res.json()
+    assert data["status"] == "dispatched"
+    assert "project_id" in data
+    assert "job_id" in data
+
+def test_notifications_and_alerts(client):
+    token = get_auth_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Update settings
+    upd_res = client.post(
+        "/api/v1/notifications/settings",
+        json={
+            "enabled": True,
+            "discord_webhook_url": "https://discord.com/api/webhooks/mock/123",
+            "telegram_bot_token": "123456:ABC-DEF",
+            "telegram_chat_id": "-10012345678",
+            "cpu_threshold": 85.0
+        },
+        headers=headers
+    )
+    assert upd_res.status_code == 200
+    assert upd_res.json()["settings"]["cpu_threshold"] == 85.0
+
+    # 2. Get settings
+    get_res = client.get("/api/v1/notifications/settings", headers=headers)
+    assert get_res.status_code == 200
+    assert get_res.json()["enabled"] is True
+
+    # 3. Test alert dispatch
+    test_res = client.post("/api/v1/notifications/test", headers=headers)
+    assert test_res.status_code == 200
+    assert test_res.json()["status"] == "tested"
+
+    # 4. View alerts
+    alerts_res = client.get("/api/v1/notifications/alerts", headers=headers)
+    assert alerts_res.status_code == 200
+    assert len(alerts_res.json()) >= 1
+
+def test_audit_export_and_backup_download(client):
+    token = get_auth_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Export CSV
+    csv_res = client.get("/api/v1/audit-logs/export?format=csv", headers=headers)
+    assert csv_res.status_code == 200
+    assert "text/csv" in csv_res.headers.get("content-type", "")
+    assert "ID,Timestamp" in csv_res.text
+
+    # 2. Export JSON
+    json_res = client.get("/api/v1/audit-logs/export?format=json", headers=headers)
+    assert json_res.status_code == 200
+    assert isinstance(json_res.json(), list)
+
+    # 3. Create and download backup
+    create_bk = client.post(
+        "/api/v1/backups",
+        json={"name": "test-export-snapshot", "backup_type": "database"},
+        headers=headers
+    )
+    assert create_bk.status_code == 200
+    bk_id = create_bk.json()["id"]
+
+    dl_res = client.get(f"/api/v1/backups/{bk_id}/download", headers=headers)
+    assert dl_res.status_code == 200
+    assert len(dl_res.content) > 0
+
+def test_container_inspect(client):
+    token = get_auth_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    servers = client.get("/api/v1/servers", headers=headers).json()
+    server_id = servers[0]["id"]
+
+    inspect_res = client.get(f"/api/v1/servers/{server_id}/containers/test-nginx/inspect", headers=headers)
+    assert inspect_res.status_code == 200
+    data = inspect_res.json()
+    assert "state" in data
+    assert "networks" in data
+    assert "mounts" in data
+

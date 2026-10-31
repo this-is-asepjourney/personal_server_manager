@@ -155,6 +155,21 @@ async def report_metrics(payload: MetricsReportRequest, db: Session = Depends(ge
     }
     await ws_manager.broadcast_server_event(server.id, event_data)
 
+    # Evaluate metrics against alerting thresholds (Discord/Telegram)
+    try:
+        from apps.api.app.services.alert_service import check_metrics_and_alert
+        check_metrics_and_alert(
+            server_id=server.id,
+            server_name=server.name,
+            metrics={
+                "cpu_usage": payload.cpu_usage,
+                "memory_usage": payload.memory_usage,
+                "disk_usage": payload.disk_usage
+            }
+        )
+    except Exception:
+        pass
+
     return {"status": "recorded", "server_id": server.id}
 
 @router.post("/inventory")

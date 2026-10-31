@@ -181,6 +181,14 @@ export default function StoragePage() {
                     <td className="p-3.5 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
+                          onClick={() => api.downloadBackup(b.id, `${b.name}.json`)}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded border border-border hover:bg-card text-foreground font-medium"
+                          title="Download Snapshot File"
+                        >
+                          <Download className="w-3 h-3 text-emerald-500" />
+                          <span>Download</span>
+                        </button>
+                        <button
                           onClick={() => handleRestore(b.id, b.name)}
                           className="flex items-center gap-1 px-2.5 py-1 rounded border border-border hover:bg-blue-500/10 text-blue-500 font-medium"
                         >

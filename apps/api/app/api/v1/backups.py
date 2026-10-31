@@ -3,6 +3,7 @@ import os
 from datetime import datetime, timezone
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from apps.api.app.database.session import get_db
 from apps.api.app.core.config import settings
@@ -83,6 +84,26 @@ def create_backup(
         details={"name": backup.name, "type": backup.backup_type}
     )
     return backup
+
+@router.get("/{backup_id}/download")
+def download_backup(
+    backup_id: str,
+    current_user: User = Depends(require_role("owner", "admin")),
+    db: Session = Depends(get_db)
+):
+    backup = db.query(Backup).filter(Backup.id == backup_id).first()
+    if not backup:
+        raise HTTPException(status_code=404, detail="Backup snapshot not found")
+
+    if not backup.file_path or not os.path.exists(backup.file_path):
+        raise HTTPException(status_code=404, detail="Backup snapshot file does not exist on storage")
+
+    filename = os.path.basename(backup.file_path)
+    return FileResponse(
+        path=backup.file_path,
+        media_type="application/octet-stream",
+        filename=filename
+    )
 
 @router.post("/{backup_id}/restore")
 def restore_backup(

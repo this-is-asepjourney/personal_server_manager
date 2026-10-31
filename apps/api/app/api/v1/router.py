@@ -9,6 +9,8 @@ from apps.api.app.api.v1.monitoring import router as monitoring_router
 from apps.api.app.api.v1.audit import router as audit_router
 from apps.api.app.api.v1.users import router as users_router
 from apps.api.app.api.v1.backups import router as backups_router
+from apps.api.app.api.v1.templates import router as templates_router
+from apps.api.app.api.v1.notifications import router as notifications_router
 
 api_router = APIRouter()
 
@@ -22,3 +24,5 @@ api_router.include_router(monitoring_router)
 api_router.include_router(audit_router)
 api_router.include_router(users_router)
 api_router.include_router(backups_router)
+api_router.include_router(templates_router)
+api_router.include_router(notifications_router)

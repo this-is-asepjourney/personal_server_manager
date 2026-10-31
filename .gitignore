@@ -38,6 +38,7 @@ data/
 uploads/
 workspace/
 releases/
+storage/
 
 # Environment files
 .env

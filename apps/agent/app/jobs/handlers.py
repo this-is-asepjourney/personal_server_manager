@@ -176,6 +176,32 @@ def handle_deployment_rollback(payload: Dict[str, Any], log_cb: Callable) -> Dic
     log_cb("info", proc.stdout.strip() if proc.stdout else "Container restarted with previous release image.")
     return {"success": True, "restored_image": target_image}
 
+def handle_deployment_compose(payload: Dict[str, Any], log_cb: Callable) -> Dict[str, Any]:
+    project_id = payload.get("project_id")
+    project_name = payload.get("project_name", f"proj-{project_id}")
+    compose_content = payload.get("compose_content", "")
+    env_vars = payload.get("environment_variables", {})
+
+    target_dir = os.path.join(agent_settings.WORKSPACE_DIR, project_id)
+    os.makedirs(target_dir, exist_ok=True)
+
+    log_cb("info", f"[Deploy] Writing docker-compose.yml for template project '{project_name}'...")
+    compose_path = os.path.join(target_dir, "docker-compose.yml")
+    with open(compose_path, "w", encoding="utf-8") as f:
+        f.write(compose_content)
+
+    if env_vars:
+        log_cb("info", f"[Deploy] Injecting {len(env_vars)} environment configuration variables...")
+        DeploymentEngine.write_env_file(target_dir, env_vars)
+
+    log_cb("info", f"[Deploy] Starting containers via docker compose up -d...")
+    deployed = DeploymentEngine.build_and_deploy_compose(target_dir, "docker-compose.yml", log_cb)
+    if not deployed:
+        raise RuntimeError(f"Failed to deploy compose stack '{project_name}'")
+
+    log_cb("info", f"[Deploy] Template stack '{project_name}' successfully deployed and operational!")
+    return {"success": True, "workspace": target_dir}
+
 HANDLERS = {
     "server.ping": handle_server_ping,
     "container.start": handle_container_start,
@@ -185,5 +211,6 @@ HANDLERS = {
     "system.prune": handle_system_prune,
     "deployment.git": handle_deployment_git,
     "deployment.zip": handle_deployment_zip,
+    "deployment.compose": handle_deployment_compose,
     "deployment.rollback": handle_deployment_rollback,
 }

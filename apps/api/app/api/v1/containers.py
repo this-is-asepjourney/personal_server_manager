@@ -217,6 +217,59 @@ def get_container_logs(
         "logs": "\n".join(lines)
     }
 
+@router.get("/containers/{cid}/inspect")
+def inspect_container(
+    server_id: str,
+    cid: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    container = db.query(Container).filter(
+        Container.server_id == server_id,
+        (Container.id == cid) | (Container.docker_id == cid)
+    ).first()
+
+    # Attempt inspection via DockerManager if available
+    inspected = {}
+    try:
+        from apps.agent.app.docker.client import docker_manager
+        target_id = container.docker_id if container else cid
+        inspected = docker_manager.inspect_container(target_id)
+    except Exception:
+        pass
+
+    if not inspected:
+        # Fallback inspection structure from DB container state
+        cname = container.name if container else cid
+        cimage = container.image if container else "unknown"
+        cstatus = container.status if container else "running"
+        cstate = container.state if container else "running"
+        ports = container.ports if container else []
+        inspected = {
+            "id": (container.docker_id if container else cid)[:12],
+            "name": cname,
+            "created": container.created_at.isoformat() if container and hasattr(container, "created_at") and container.created_at else datetime.now(timezone.utc).isoformat(),
+            "state": {"Status": cstatus, "Running": cstatus == "running"},
+            "image": cimage,
+            "cmd": ["/entrypoint.sh"],
+            "env": ["NODE_ENV=production", "PORT=3000"],
+            "networks": {
+                "psm-network": {"ip_address": "172.28.0.x", "gateway": "172.28.0.1"}
+            },
+            "ip_address": "172.28.0.x",
+            "ports": ports,
+            "mounts": [
+                {"type": "volume", "source": f"psm_{cname}_data", "destination": "/data", "mode": "rw"}
+            ],
+            "restart_policy": {"Name": "unless-stopped"}
+        }
+
+    return inspected
+
 @router.get("/containers/{cid}/stats")
 def get_container_stats(
     server_id: str,

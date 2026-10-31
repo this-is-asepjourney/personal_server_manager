@@ -21,6 +21,10 @@ import {
   Key,
   ShieldAlert,
   X,
+  Eye,
+  Download,
+  Search,
+  Info,
 } from 'lucide-react';
 import { api } from '../../../lib/api';
 
@@ -43,6 +47,14 @@ export default function ServerDetailPage() {
     open: false,
     name: '',
     logs: [],
+  });
+  const [logSearch, setLogSearch] = useState('');
+  const [logLevel, setLogLevel] = useState<'ALL' | 'INFO' | 'WARN' | 'ERROR'>('ALL');
+
+  // Container inspect modal state
+  const [inspectModal, setInspectModal] = useState<{ open: boolean; data: any | null }>({
+    open: false,
+    data: null,
   });
 
   // Settings form state
@@ -112,9 +124,33 @@ export default function ServerDetailPage() {
         ? res.logs.split('\n')
         : ['No log output available.'];
       setLogsModal({ open: true, name, logs: lines });
+      setLogSearch('');
+      setLogLevel('ALL');
     } catch (err: any) {
       alert(err.message || 'Failed to fetch container logs');
     }
+  };
+
+  const handleInspectContainer = async (cid: string) => {
+    try {
+      const data = await api.inspectContainer(serverId, cid);
+      setInspectModal({ open: true, data });
+    } catch (err: any) {
+      alert(err.message || 'Failed to inspect container');
+    }
+  };
+
+  const handleDownloadLogs = () => {
+    const text = logsModal.logs.join('\n');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${logsModal.name}_logs_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   };
 
   const handleReconnect = async () => {
@@ -376,6 +412,13 @@ export default function ServerDetailPage() {
                       <td className="p-3.5 text-right">
                         <div className="flex items-center justify-end gap-1.5">
                           <button
+                            onClick={() => handleInspectContainer(c.docker_id || c.id)}
+                            className="p-1.5 rounded hover:bg-gray-500/10 text-gray-400 hover:text-blue-400"
+                            title="Inspect Container"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                          <button
                             onClick={() => handleViewLogs(c.docker_id || c.id, c.name)}
                             className="p-1.5 rounded hover:bg-gray-500/10 text-gray-400 hover:text-foreground"
                             title="View Logs"
@@ -569,27 +612,175 @@ export default function ServerDetailPage() {
       )}
 
       {/* Container Logs Modal */}
-      {logsModal.open && (
+      {logsModal.open && (() => {
+        const filteredLines = logsModal.logs.filter((line) => {
+          const matchSearch = !logSearch || line.toLowerCase().includes(logSearch.toLowerCase());
+          if (!matchSearch) return false;
+          if (logLevel === 'ALL') return true;
+          if (logLevel === 'ERROR') return line.includes('[ERROR]') || line.toLowerCase().includes('error');
+          if (logLevel === 'WARN') return line.includes('[WARN') || line.toLowerCase().includes('warn');
+          if (logLevel === 'INFO') return line.includes('[INFO') || line.toLowerCase().includes('info');
+          return true;
+        });
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="w-full max-w-3xl rounded-xl border border-slate-800 bg-slate-950 shadow-2xl overflow-hidden font-mono text-xs">
+              <div className="flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-800">
+                <div className="flex items-center gap-2 text-slate-200 font-semibold">
+                  <Terminal className="w-4 h-4 text-blue-400" />
+                  <span>Container Logs: {logsModal.name}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleDownloadLogs}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px]"
+                    title="Download Logs"
+                  >
+                    <Download className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Download</span>
+                  </button>
+                  <button
+                    onClick={() => setLogsModal({ open: false, name: '', logs: [] })}
+                    className="text-slate-400 hover:text-white p-1"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Search & Filter Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-slate-900/60 border-b border-slate-800 text-[11px]">
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2" />
+                    <input
+                      type="text"
+                      placeholder="Filter log output..."
+                      value={logSearch}
+                      onChange={(e) => setLogSearch(e.target.value)}
+                      className="pl-7 pr-3 py-1 rounded bg-slate-950 border border-slate-800 text-slate-200 focus:outline-none focus:border-blue-500 w-48 text-[11px]"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {(['ALL', 'INFO', 'WARN', 'ERROR'] as const).map((lvl) => (
+                      <button
+                        key={lvl}
+                        onClick={() => setLogLevel(lvl)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${
+                          logLevel === lvl
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-800 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {lvl}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <span className="text-slate-500 text-[10px]">
+                  Showing {filteredLines.length} of {logsModal.logs.length} lines
+                </span>
+              </div>
+
+              {/* Log Lines */}
+              <div className="p-4 max-h-96 overflow-y-auto space-y-1 text-slate-300 bg-slate-950/80">
+                {filteredLines.length === 0 ? (
+                  <div className="text-slate-500 text-center py-6">No log lines match current filter.</div>
+                ) : (
+                  filteredLines.map((line, i) => {
+                    const isError = line.toLowerCase().includes('error') || line.includes('[ERROR]');
+                    const isWarn = line.toLowerCase().includes('warn') || line.includes('[WARN');
+                    return (
+                      <div
+                        key={i}
+                        className={`py-0.5 border-b border-slate-900/60 break-all ${
+                          isError ? 'text-rose-400 font-semibold' : isWarn ? 'text-amber-400' : 'text-slate-300'
+                        }`}
+                      >
+                        {line}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Container Inspect Modal */}
+      {inspectModal.open && inspectModal.data && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-2xl rounded-xl border border-slate-800 bg-slate-950 shadow-2xl overflow-hidden font-mono text-xs">
-            <div className="flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-800">
-              <div className="flex items-center gap-2 text-slate-200 font-semibold">
-                <Terminal className="w-4 h-4 text-blue-400" />
-                <span>Container Logs: {logsModal.name}</span>
+          <div className="w-full max-w-2xl rounded-xl border border-border bg-card shadow-2xl overflow-hidden font-mono text-xs">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-background/50">
+              <div className="flex items-center gap-2">
+                <Info className="w-4 h-4 text-blue-500" />
+                <span className="font-bold text-foreground">
+                  Container Inspect: {inspectModal.data.name} ({inspectModal.data.id})
+                </span>
               </div>
               <button
-                onClick={() => setLogsModal({ open: false, name: '', logs: [] })}
-                className="text-slate-400 hover:text-white"
+                onClick={() => setInspectModal({ open: false, data: null })}
+                className="text-gray-400 hover:text-foreground"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-4 max-h-96 overflow-y-auto space-y-1 text-slate-300">
-              {logsModal.logs.map((line, i) => (
-                <div key={i} className="py-0.5 border-b border-slate-900/60 break-all">
-                  {line}
+
+            <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+              {/* Summary Badges */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="p-2.5 rounded-lg border border-border bg-background">
+                  <span className="text-gray-400 block text-[10px]">Status</span>
+                  <span className="font-bold text-emerald-500 uppercase">{inspectModal.data.state?.Status || 'running'}</span>
                 </div>
-              ))}
+                <div className="p-2.5 rounded-lg border border-border bg-background">
+                  <span className="text-gray-400 block text-[10px]">Image</span>
+                  <span className="font-bold text-foreground truncate block">{inspectModal.data.image || 'N/A'}</span>
+                </div>
+                <div className="p-2.5 rounded-lg border border-border bg-background">
+                  <span className="text-gray-400 block text-[10px]">IP Address</span>
+                  <span className="font-bold text-blue-500">{inspectModal.data.ip_address || '172.x.x.x'}</span>
+                </div>
+                <div className="p-2.5 rounded-lg border border-border bg-background">
+                  <span className="text-gray-400 block text-[10px]">Restart Policy</span>
+                  <span className="font-bold text-foreground">{inspectModal.data.restart_policy?.Name || 'unless-stopped'}</span>
+                </div>
+              </div>
+
+              {/* Volumes / Mounts */}
+              <div className="space-y-1.5">
+                <span className="text-gray-400 font-semibold block text-[11px]">Mounted Volumes</span>
+                {Array.isArray(inspectModal.data.mounts) && inspectModal.data.mounts.length > 0 ? (
+                  <div className="space-y-1">
+                    {inspectModal.data.mounts.map((m: any, idx: number) => (
+                      <div key={idx} className="p-2 rounded bg-background border border-border text-[11px]">
+                        <span className="text-blue-400 font-semibold">{m.source}</span>
+                        <span className="text-gray-500"> → </span>
+                        <span className="text-emerald-400">{m.destination}</span>
+                        <span className="text-gray-500 text-[10px] ml-2">({m.type || 'volume'})</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-gray-500 text-[11px]">No persistent volume mounts.</div>
+                )}
+              </div>
+
+              {/* Environment Variables */}
+              <div className="space-y-1.5">
+                <span className="text-gray-400 font-semibold block text-[11px]">Environment Variables (Masked)</span>
+                <div className="p-2.5 rounded bg-background border border-border max-h-36 overflow-y-auto space-y-1 text-[11px] text-gray-300">
+                  {Array.isArray(inspectModal.data.env) && inspectModal.data.env.length > 0 ? (
+                    inspectModal.data.env.map((e: string, idx: number) => (
+                      <div key={idx} className="break-all">{e}</div>
+                    ))
+                  ) : (
+                    <div className="text-gray-500">Default runtime environment</div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Clock,
   User,
+  Download,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 
@@ -39,6 +40,14 @@ export default function ActivityPage() {
       (l.user_name && l.user_name.toLowerCase().includes(search.toLowerCase()))
   );
 
+  const handleExport = async (fmt: 'csv' | 'json') => {
+    try {
+      await api.exportAuditLogs(fmt);
+    } catch (err: any) {
+      alert(err.message || 'Export failed');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -49,13 +58,31 @@ export default function ActivityPage() {
             Immutable audit trail of security operations, deployments, and server changes.
           </p>
         </div>
-        <button
-          onClick={loadLogs}
-          className="p-2 rounded-lg border border-border text-gray-500 hover:text-foreground hover:bg-card transition-all w-fit"
-          title="Refresh"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleExport('csv')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:bg-card text-foreground text-xs font-medium transition-colors"
+            title="Export as CSV"
+          >
+            <Download className="w-3.5 h-3.5 text-blue-500" />
+            <span>Export CSV</span>
+          </button>
+          <button
+            onClick={() => handleExport('json')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:bg-card text-foreground text-xs font-medium transition-colors"
+            title="Export as JSON"
+          >
+            <Download className="w-3.5 h-3.5 text-purple-500" />
+            <span>Export JSON</span>
+          </button>
+          <button
+            onClick={loadLogs}
+            className="p-2 rounded-lg border border-border text-gray-500 hover:text-foreground hover:bg-card transition-all"
+            title="Refresh"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {/* Filter / Search Bar */}
