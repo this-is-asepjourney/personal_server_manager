@@ -23,6 +23,7 @@ import {
   Boxes,
   Bell,
   AlertTriangle,
+  Network,
 } from 'lucide-react';
 import { useTheme } from './theme-provider';
 import { api, getAuthToken } from '../lib/api';
@@ -40,6 +41,7 @@ const navItems: NavItem[] = [
   { name: 'Projects', href: '/projects', icon: FolderGit2 },
   { name: 'Deployments', href: '/deployments', icon: Rocket },
   { name: 'Monitoring', href: '/monitoring', icon: Activity },
+  { name: 'Network', href: '/network', icon: Network },
   { name: 'Storage', href: '/storage', icon: HardDrive },
   { name: 'Activity Log', href: '/activity', icon: History },
   { name: 'Settings', href: '/settings', icon: Settings },

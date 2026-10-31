@@ -32,6 +32,9 @@ from apps.api.app.websocket.manager import ws_manager
 
 router = APIRouter(prefix="/agents", tags=["Agent"])
 
+# In-memory cache of the most recent extended telemetry report per server
+LATEST_TELEMETRY: dict[str, dict] = {}
+
 @router.post("/register")
 def register_agent(payload: AgentRegisterRequest, db: Session = Depends(get_db)):
     server = resolve_server(db, payload.server_id)
@@ -131,27 +134,48 @@ async def report_metrics(payload: MetricsReportRequest, db: Session = Depends(ge
     db.add(metric)
     db.commit()
 
+    telemetry_snapshot = {
+        "cpu_usage": payload.cpu_usage,
+        "cpu_cores": payload.cpu_cores or 1,
+        "load_avg": payload.load_avg or [0.0, 0.0, 0.0],
+        "memory_usage": payload.memory_usage,
+        "memory_used_bytes": payload.memory_used_bytes,
+        "memory_total_bytes": payload.memory_total_bytes,
+        "disk_usage": payload.disk_usage,
+        "disk_used_bytes": payload.disk_used_bytes,
+        "disk_free_bytes": payload.disk_free_bytes or max(0, payload.disk_total_bytes - payload.disk_used_bytes),
+        "disk_total_bytes": payload.disk_total_bytes,
+        "disk_read_bytes": payload.disk_read_bytes,
+        "disk_write_bytes": payload.disk_write_bytes,
+        "disk_read_count": payload.disk_read_count,
+        "disk_write_count": payload.disk_write_count,
+        "disk_read_bytes_per_sec": payload.disk_read_bytes_per_sec,
+        "disk_write_bytes_per_sec": payload.disk_write_bytes_per_sec,
+        "disk_partitions": payload.disk_partitions or [],
+        "network_rx": payload.network_rx_bytes_per_sec,
+        "network_tx": payload.network_tx_bytes_per_sec,
+        "network_total_rx_bytes": payload.network_total_rx_bytes,
+        "network_total_tx_bytes": payload.network_total_tx_bytes,
+        "network_packets_recv": payload.network_packets_recv,
+        "network_packets_sent": payload.network_packets_sent,
+        "network_err_in": payload.network_err_in,
+        "network_err_out": payload.network_err_out,
+        "network_drop_in": payload.network_drop_in,
+        "network_drop_out": payload.network_drop_out,
+        "network_interfaces": payload.network_interfaces or [],
+        "listening_ports": payload.listening_ports or [],
+        "connection_stats": payload.connection_stats or {},
+        "uptime": payload.uptime_seconds,
+        "container_stats": payload.container_stats or [],
+        "recorded_at": now.isoformat()
+    }
+    LATEST_TELEMETRY[server.id] = telemetry_snapshot
+
     # Broadcast to WebSocket listeners
     event_data = {
         "event": "server.metrics.updated",
         "server_id": server.id,
-        "data": {
-            "cpu_usage": payload.cpu_usage,
-            "cpu_cores": payload.cpu_cores or 1,
-            "load_avg": payload.load_avg or [0.0, 0.0, 0.0],
-            "memory_usage": payload.memory_usage,
-            "memory_used_bytes": payload.memory_used_bytes,
-            "memory_total_bytes": payload.memory_total_bytes,
-            "disk_usage": payload.disk_usage,
-            "disk_used_bytes": payload.disk_used_bytes,
-            "disk_total_bytes": payload.disk_total_bytes,
-            "disk_partitions": payload.disk_partitions or [],
-            "network_rx": payload.network_rx_bytes_per_sec,
-            "network_tx": payload.network_tx_bytes_per_sec,
-            "uptime": payload.uptime_seconds,
-            "container_stats": payload.container_stats or [],
-            "recorded_at": now.isoformat()
-        }
+        "data": telemetry_snapshot
     }
     await ws_manager.broadcast_server_event(server.id, event_data)
 

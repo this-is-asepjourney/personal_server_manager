@@ -142,9 +142,27 @@ class MetricsReportRequest(BaseModel):
     memory_total_bytes: int = 0
     disk_usage: float
     disk_used_bytes: int = 0
+    disk_free_bytes: int = 0
     disk_total_bytes: int = 0
+    disk_read_bytes: int = 0
+    disk_write_bytes: int = 0
+    disk_read_count: int = 0
+    disk_write_count: int = 0
+    disk_read_bytes_per_sec: float = 0.0
+    disk_write_bytes_per_sec: float = 0.0
     network_rx_bytes_per_sec: float = 0.0
     network_tx_bytes_per_sec: float = 0.0
+    network_total_rx_bytes: int = 0
+    network_total_tx_bytes: int = 0
+    network_packets_recv: int = 0
+    network_packets_sent: int = 0
+    network_err_in: int = 0
+    network_err_out: int = 0
+    network_drop_in: int = 0
+    network_drop_out: int = 0
+    network_interfaces: Optional[List[Dict[str, Any]]] = None
+    listening_ports: Optional[List[Dict[str, Any]]] = None
+    connection_stats: Optional[Dict[str, Any]] = None
     uptime_seconds: int = 0
     load_avg: Optional[List[float]] = None
     cpu_cores: Optional[int] = None

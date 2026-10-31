@@ -203,6 +203,16 @@ def health_check():
         "version": settings.VERSION
     }
 
+@app.get("/metrics")
+def prometheus_root_metrics():
+    """Standard Prometheus scrape endpoint exposing PSM cluster and host metrics."""
+    from apps.api.app.api.v1.monitoring import export_prometheus_metrics
+    db = SessionLocal()
+    try:
+        return export_prometheus_metrics(db=db)
+    finally:
+        db.close()
+
 @app.get("/install-agent.sh")
 def get_agent_install_script():
     script_content = """#!/usr/bin/env bash

@@ -341,3 +341,48 @@ def test_container_inspect(client):
     assert "networks" in data
     assert "mounts" in data
 
+
+def test_prometheus_storage_and_network_endpoints(client):
+    token = get_auth_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Prometheus OpenMetrics scrape endpoints
+    prom_metrics = client.get("/metrics")
+    assert prom_metrics.status_code == 200
+    assert "psm_server_online" in prom_metrics.text
+    assert "psm_disk_free_bytes" in prom_metrics.text
+
+    # 2. Prometheus status & config
+    prom_status = client.get("/api/v1/monitoring/prometheus/status", headers=headers)
+    assert prom_status.status_code == 200
+    assert "connected" in prom_status.json()
+
+    prom_cfg = client.post(
+        "/api/v1/monitoring/prometheus/config",
+        json={"prometheus_url": "http://host.docker.internal:9001"},
+        headers=headers,
+    )
+    assert prom_cfg.status_code == 200
+
+    # 3. Storage telemetry (used vs unused + disk R/W)
+    storage_res = client.get("/api/v1/monitoring/storage", headers=headers)
+    assert storage_res.status_code == 200
+    st_data = storage_res.json()
+    assert "summary" in st_data
+    assert "used_bytes" in st_data["summary"]
+    assert "free_bytes" in st_data["summary"]
+    assert "read_bytes_per_sec" in st_data["summary"]
+    assert "write_bytes_per_sec" in st_data["summary"]
+    assert "partitions" in st_data
+    assert "volumes" in st_data
+
+    # 4. Network telemetry (bandwidth, interfaces, listening ports)
+    net_res = client.get("/api/v1/monitoring/network", headers=headers)
+    assert net_res.status_code == 200
+    net_data = net_res.json()
+    assert "bandwidth" in net_data
+    assert "interfaces" in net_data
+    assert "listening_ports" in net_data
+    assert "connection_stats" in net_data
+
+

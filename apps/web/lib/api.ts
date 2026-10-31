@@ -348,6 +348,41 @@ export const api = {
     return res.ok ? res.json() : [];
   },
 
+  async getPrometheusStatus() {
+    const res = await fetchWithAuth('/api/v1/monitoring/prometheus/status');
+    return res.ok ? res.json() : null;
+  },
+
+  async updatePrometheusConfig(prometheusUrl: string) {
+    const res = await fetchWithAuth('/api/v1/monitoring/prometheus/config', {
+      method: 'POST',
+      body: JSON.stringify({ prometheus_url: prometheusUrl }),
+    });
+    if (!res.ok) throw new Error('Failed to save Prometheus URL');
+    return res.json();
+  },
+
+  async getStorageTelemetry(serverId?: string) {
+    const qs = serverId ? `?server_id=${serverId}` : '';
+    const res = await fetchWithAuth(`/api/v1/monitoring/storage${qs}`);
+    return res.ok ? res.json() : null;
+  },
+
+  async getNetworkTelemetry(serverId?: string) {
+    const qs = serverId ? `?server_id=${serverId}` : '';
+    const res = await fetchWithAuth(`/api/v1/monitoring/network${qs}`);
+    return res.ok ? res.json() : null;
+  },
+
+  async probeNetworkTarget(target: string, port?: number) {
+    const res = await fetchWithAuth('/api/v1/monitoring/network/probe', {
+      method: 'POST',
+      body: JSON.stringify({ target, port }),
+    });
+    if (!res.ok) throw new Error('Probe request failed');
+    return res.json();
+  },
+
   // Backups
   async getBackups() {
     const res = await fetchWithAuth('/api/v1/backups');
