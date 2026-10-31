@@ -20,8 +20,17 @@ def test_system_and_metrics_collector():
 def test_allowed_job_types():
     assert "server.ping" in ALLOWED_JOB_TYPES
     assert "container.start" in ALLOWED_JOB_TYPES
+    assert "system.prune" in ALLOWED_JOB_TYPES
     assert "deployment.git" in ALLOWED_JOB_TYPES
     assert "arbitrary.shell" not in ALLOWED_JOB_TYPES
+
+def test_write_env_file(tmp_path):
+    DeploymentEngine.write_env_file(str(tmp_path), {"PORT": "8080", "NODE_ENV": "production"})
+    env_file = tmp_path / ".env"
+    assert env_file.exists()
+    content = env_file.read_text()
+    assert "PORT=8080" in content
+    assert "NODE_ENV=production" in content
 
 def test_server_ping_handler():
     logs = []

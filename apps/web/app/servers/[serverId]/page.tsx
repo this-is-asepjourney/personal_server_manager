@@ -79,6 +79,17 @@ export default function ServerDetailPage() {
     loadData();
   }, [serverId]);
 
+  const handlePruneSystem = async () => {
+    if (!confirm('Run Docker System Prune? This will remove all stopped containers, dangling images, unused networks, and build cache.')) return;
+    try {
+      await api.pruneServer(serverId);
+      alert('Docker system prune job dispatched to agent.');
+      setTimeout(loadData, 2000);
+    } catch (err: any) {
+      alert(err.message || 'Prune request failed');
+    }
+  };
+
   const handleContainerAction = async (cid: string, action: 'start' | 'stop' | 'restart' | 'remove') => {
     if (action === 'remove' && !confirm('Are you sure you want to remove this container?')) return;
     try {
@@ -305,13 +316,25 @@ export default function ServerDetailPage() {
       {activeTab === 'containers' && (
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="p-4 border-b border-border flex items-center justify-between">
-            <h3 className="font-bold text-sm text-foreground">Docker Containers</h3>
-            <button
-              onClick={loadData}
-              className="text-xs text-blue-500 hover:underline flex items-center gap-1"
-            >
-              <RefreshCw className="w-3 h-3" /> Refresh
-            </button>
+            <div>
+              <h3 className="font-bold text-sm text-foreground">Docker Containers</h3>
+              <p className="text-[11px] text-gray-500">Live inventory synced from host Docker daemon</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handlePruneSystem}
+                className="text-xs text-amber-500 hover:text-amber-400 border border-amber-500/20 bg-amber-500/5 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all"
+                title="Remove stopped containers and dangling images"
+              >
+                <Trash2 className="w-3 h-3" /> Prune System
+              </button>
+              <button
+                onClick={loadData}
+                className="text-xs text-blue-500 hover:underline flex items-center gap-1 px-2.5 py-1"
+              >
+                <RefreshCw className="w-3 h-3" /> Refresh
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">

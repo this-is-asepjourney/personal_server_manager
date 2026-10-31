@@ -137,15 +137,19 @@ async def report_metrics(payload: MetricsReportRequest, db: Session = Depends(ge
         "server_id": server.id,
         "data": {
             "cpu_usage": payload.cpu_usage,
+            "cpu_cores": payload.cpu_cores or 1,
+            "load_avg": payload.load_avg or [0.0, 0.0, 0.0],
             "memory_usage": payload.memory_usage,
             "memory_used_bytes": payload.memory_used_bytes,
             "memory_total_bytes": payload.memory_total_bytes,
             "disk_usage": payload.disk_usage,
             "disk_used_bytes": payload.disk_used_bytes,
             "disk_total_bytes": payload.disk_total_bytes,
+            "disk_partitions": payload.disk_partitions or [],
             "network_rx": payload.network_rx_bytes_per_sec,
             "network_tx": payload.network_tx_bytes_per_sec,
             "uptime": payload.uptime_seconds,
+            "container_stats": payload.container_stats or [],
             "recorded_at": now.isoformat()
         }
     }

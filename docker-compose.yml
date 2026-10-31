@@ -19,7 +19,7 @@ services:
 
   api:
     build:
-      context: .
+      context: .  
       dockerfile: infrastructure/docker/Dockerfile.api
     container_name: psm-api
     restart: unless-stopped

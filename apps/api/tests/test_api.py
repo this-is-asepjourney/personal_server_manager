@@ -206,3 +206,24 @@ def test_users_and_backups_crud(client):
 
     b_del = client.delete(f"/api/v1/backups/{backup_id}", headers=headers)
     assert b_del.status_code == 200
+
+def test_docker_prune_and_github_webhook(client):
+    token = get_auth_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Prune
+    servers = client.get("/api/v1/servers", headers=headers).json()
+    server_id = servers[0]["id"]
+    prune_res = client.post(f"/api/v1/servers/{server_id}/prune", headers=headers)
+    assert prune_res.status_code == 200
+    assert "job_id" in prune_res.json()
+
+    # Webhook
+    projects = client.get("/api/v1/projects", headers=headers).json()
+    project_id = projects[0]["id"]
+    wh_res = client.post(
+        f"/api/v1/deployments/webhook/{project_id}",
+        json={"ref": "refs/heads/main", "after": "a1b2c3d4e5f6"}
+    )
+    assert wh_res.status_code == 200
+    assert wh_res.json()["status"] == "triggered"

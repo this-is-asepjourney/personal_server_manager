@@ -13,6 +13,7 @@ ALLOWED_JOB_TYPES = {
     "container.stop",
     "container.restart",
     "container.remove",
+    "system.prune",
     "deployment.git",
     "deployment.zip",
     "deployment.compose",
@@ -56,44 +57,123 @@ def handle_container_remove(payload: Dict[str, Any], log_cb: Callable) -> Dict[s
     success = docker_manager.remove_container(cid, force=force)
     return {"success": success}
 
+def handle_system_prune(payload: Dict[str, Any], log_cb: Callable) -> Dict[str, Any]:
+    all_images = payload.get("all_images", False)
+    log_cb("info", f"Running Docker system prune (all_images={all_images})...")
+    res = docker_manager.prune_system(all_images=all_images)
+    log_cb("info", f"Prune completed. Output: {res.get('output', 'Success')}")
+    return res
+
 def handle_deployment_git(payload: Dict[str, Any], log_cb: Callable) -> Dict[str, Any]:
     project_id = payload.get("project_id")
+    project_name = payload.get("project_name", f"proj-{project_id}")
     repo_url = payload.get("repository_url")
     branch = payload.get("branch", "main")
+    commit_hash = payload.get("commit_hash")
     compose_path = payload.get("compose_path", "docker-compose.yml")
+    dockerfile_path = payload.get("dockerfile_path", "Dockerfile")
+    image_tag = payload.get("image_tag", f"{project_name}:latest")
+    env_vars = payload.get("environment_variables", {})
 
     target_dir = os.path.join(agent_settings.WORKSPACE_DIR, project_id)
-    log_cb("info", f"Starting Git deployment for project {project_id}...")
-    
-    # 1. Clone or pull
-    cloned = DeploymentEngine.clone_or_pull_git(repo_url, branch, target_dir, log_cb)
+    log_cb("info", f"[Deploy] Starting Git deployment for project '{project_name}'...")
+
+    # 1. Clone or pull repository
+    cloned = DeploymentEngine.clone_or_pull_git(repo_url, branch, target_dir, log_cb, commit_hash=commit_hash)
     if not cloned:
         raise RuntimeError("Failed to clone or pull git repository")
 
-    # 2. Deploy with compose
-    deployed = DeploymentEngine.build_and_deploy_compose(target_dir, compose_path, log_cb)
-    log_cb("info", "Deployment completed successfully.")
-    return {"success": deployed, "workspace": target_dir}
+    # 2. Write project environment secrets into .env file
+    if env_vars:
+        log_cb("info", f"[Deploy] Injecting {len(env_vars)} environment secret(s) into .env...")
+        DeploymentEngine.write_env_file(target_dir, env_vars)
+
+    # 3. Check for Compose vs Dockerfile
+    deployed = False
+    has_compose = os.path.exists(os.path.join(target_dir, compose_path))
+    has_dockerfile = os.path.exists(os.path.join(target_dir, dockerfile_path))
+
+    if has_compose:
+        log_cb("info", f"[Deploy] Found Compose file '{compose_path}'. Building and launching stack...")
+        deployed = DeploymentEngine.build_and_deploy_compose(target_dir, compose_path, log_cb)
+    elif has_dockerfile:
+        log_cb("info", f"[Deploy] Found Dockerfile '{dockerfile_path}'. Building image and running container...")
+        deployed = DeploymentEngine.build_and_run_dockerfile(
+            workspace_dir=target_dir,
+            dockerfile_path=dockerfile_path,
+            image_tag=image_tag,
+            container_name=project_name,
+            log_callback=log_cb
+        )
+    else:
+        # Fallback check for any Dockerfile in root
+        if os.path.exists(os.path.join(target_dir, "Dockerfile")):
+            deployed = DeploymentEngine.build_and_run_dockerfile(
+                workspace_dir=target_dir,
+                dockerfile_path="Dockerfile",
+                image_tag=image_tag,
+                container_name=project_name,
+                log_callback=log_cb
+            )
+        else:
+            raise RuntimeError(f"Neither '{compose_path}' nor '{dockerfile_path}' was found in the repository root.")
+
+    if not deployed:
+        raise RuntimeError("Build or launch process failed. See deployment logs for details.")
+
+    log_cb("info", f"[Deploy] Project '{project_name}' deployed successfully to Docker!")
+    return {"success": True, "workspace": target_dir, "image_tag": image_tag}
 
 def handle_deployment_zip(payload: Dict[str, Any], log_cb: Callable) -> Dict[str, Any]:
     project_id = payload.get("project_id")
+    project_name = payload.get("project_name", f"proj-{project_id}")
     zip_path = payload.get("zip_path")
+    image_tag = payload.get("image_tag", f"{project_name}:latest")
+    dockerfile_path = payload.get("dockerfile_path", "Dockerfile")
+    compose_path = payload.get("compose_path", "docker-compose.yml")
+    env_vars = payload.get("environment_variables", {})
+
     target_dir = os.path.join(agent_settings.WORKSPACE_DIR, project_id)
 
-    log_cb("info", f"Extracting ZIP {zip_path} into {target_dir}...")
+    log_cb("info", f"[Deploy] Extracting ZIP package into workspace {target_dir}...")
     DeploymentEngine.safe_extract_zip(zip_path, target_dir)
 
-    log_cb("info", "Building and launching containers...")
-    DeploymentEngine.build_and_deploy_compose(target_dir, "docker-compose.yml", log_cb)
-    log_cb("info", "ZIP deployment completed successfully.")
+    if env_vars:
+        log_cb("info", f"[Deploy] Injecting {len(env_vars)} environment secret(s) into .env...")
+        DeploymentEngine.write_env_file(target_dir, env_vars)
+
+    has_compose = os.path.exists(os.path.join(target_dir, compose_path))
+    if has_compose:
+        log_cb("info", f"[Deploy] Launching Docker Compose stack...")
+        deployed = DeploymentEngine.build_and_deploy_compose(target_dir, compose_path, log_cb)
+    else:
+        log_cb("info", f"[Deploy] Launching Dockerfile build...")
+        deployed = DeploymentEngine.build_and_run_dockerfile(
+            workspace_dir=target_dir,
+            dockerfile_path=dockerfile_path if os.path.exists(os.path.join(target_dir, dockerfile_path)) else "Dockerfile",
+            image_tag=image_tag,
+            container_name=project_name,
+            log_callback=log_cb
+        )
+
+    if not deployed:
+        raise RuntimeError("ZIP build or launch failed")
+
+    log_cb("info", "[Deploy] ZIP deployment completed successfully.")
     return {"success": True, "workspace": target_dir}
 
 def handle_deployment_rollback(payload: Dict[str, Any], log_cb: Callable) -> Dict[str, Any]:
     target_image = payload.get("target_image_tag")
-    project_name = payload.get("project_name")
-    log_cb("warning", f"Initiating rollback to image: {target_image}...")
-    # Rollback execution
-    log_cb("info", f"Rolling back project {project_name} containers to {target_image}")
+    project_name = payload.get("project_name", "app")
+    log_cb("warning", f"[Rollback] Initiating rollback to image: {target_image}...")
+    sanitized_name = project_name.lower().replace(" ", "-")
+
+    # Stop current container and run previous image tag
+    subprocess.run(["docker", "stop", sanitized_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(["docker", "rm", "-f", sanitized_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    cmd = ["docker", "run", "-d", "--restart", "unless-stopped", "--name", sanitized_name, target_image]
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    log_cb("info", proc.stdout.strip() if proc.stdout else "Container restarted with previous release image.")
     return {"success": True, "restored_image": target_image}
 
 HANDLERS = {
@@ -102,8 +182,8 @@ HANDLERS = {
     "container.stop": handle_container_stop,
     "container.restart": handle_container_restart,
     "container.remove": handle_container_remove,
+    "system.prune": handle_system_prune,
     "deployment.git": handle_deployment_git,
     "deployment.zip": handle_deployment_zip,
     "deployment.rollback": handle_deployment_rollback,
 }
-

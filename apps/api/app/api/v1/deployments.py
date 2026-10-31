@@ -4,10 +4,11 @@ import shutil
 import zipfile
 from datetime import datetime, timezone
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
 from sqlalchemy.orm import Session
 from apps.api.app.database.session import get_db
 from apps.api.app.core.config import settings
+from apps.api.app.core.security import decrypt_secret
 from apps.api.app.core.dependencies import get_current_user, require_role
 from apps.api.app.models.entities import (
     Project,
@@ -102,6 +103,14 @@ async def create_git_deployment(
     db.add(initial_log)
     db.commit()
 
+    # Decrypt project environment variables to pass securely to agent
+    env_vars = {}
+    for var in project.environment_variables:
+        try:
+            env_vars[var.key] = decrypt_secret(var.encrypted_value)
+        except Exception:
+            pass
+
     # Dispatch job to target server agent
     job_payload = {
         "deployment_id": deployment.id,
@@ -113,7 +122,8 @@ async def create_git_deployment(
         "dockerfile_path": src.dockerfile_path or "Dockerfile",
         "compose_path": src.compose_path or "docker-compose.yml",
         "image_tag": image_tag,
-        "version": version
+        "version": version,
+        "environment_variables": env_vars
     }
 
     job = await create_and_dispatch_job(
@@ -229,13 +239,23 @@ async def finalize_zip_upload(
     db.commit()
 
     # Dispatch job to server agent
+    env_vars = {}
+    for var in project.environment_variables:
+        try:
+            env_vars[var.key] = decrypt_secret(var.encrypted_value)
+        except Exception:
+            pass
+
     job_payload = {
         "deployment_id": deployment.id,
         "project_id": project.id,
         "project_name": project.name,
         "zip_path": target_path,
         "image_tag": image_tag,
-        "version": version
+        "version": version,
+        "dockerfile_path": project.source.dockerfile_path if project.source else "Dockerfile",
+        "compose_path": project.source.compose_path if project.source else "docker-compose.yml",
+        "environment_variables": env_vars
     }
 
     job = await create_and_dispatch_job(
@@ -270,6 +290,113 @@ async def finalize_zip_upload(
         duration_seconds=0,
         created_at=deployment.created_at,
     )
+
+@router.post("/webhook/{project_id}")
+async def github_webhook_trigger(
+    project_id: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Automated deployment trigger from GitHub or GitLab webhooks."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    src = project.source
+    if not src or not src.repository_url:
+        raise HTTPException(status_code=400, detail="Project has no Git repository configured")
+
+    payload = {}
+    try:
+        payload = await request.json()
+    except Exception:
+        pass
+
+    # Extract branch and commit from GitHub push payload
+    ref = payload.get("ref", "")
+    pushed_branch = ref.split("/")[-1] if "/" in ref else (src.branch or "main")
+    commit_hash = payload.get("after") or (payload.get("head_commit", {}) or {}).get("id") or "HEAD"
+
+    # Only deploy if matching configured branch (default to main)
+    target_branch = src.branch or "main"
+    if pushed_branch and pushed_branch != target_branch:
+        return {
+            "status": "ignored",
+            "reason": f"Push event on branch '{pushed_branch}' does not match tracking branch '{target_branch}'"
+        }
+
+    version = get_next_version(db, project.id)
+    image_tag = f"{project.name.lower().replace(' ', '-')}:v{version}"
+    now = datetime.now(timezone.utc)
+
+    deployment = Deployment(
+        project_id=project.id,
+        version=version,
+        commit_hash=commit_hash[:8] if len(commit_hash) >= 8 else commit_hash,
+        image_tag=image_tag,
+        status="building",
+        triggered_by=project.owner_id,
+        started_at=now
+    )
+    db.add(deployment)
+    db.commit()
+    db.refresh(deployment)
+
+    initial_log = DeploymentLog(
+        deployment_id=deployment.id,
+        sequence=1,
+        level="info",
+        message=f"[Webhook] Auto-deploy v{version} triggered by GitHub push on '{pushed_branch}' ({commit_hash[:7]})"
+    )
+    db.add(initial_log)
+    db.commit()
+
+    env_vars = {}
+    for var in project.environment_variables:
+        try:
+            env_vars[var.key] = decrypt_secret(var.encrypted_value)
+        except Exception:
+            pass
+
+    job_payload = {
+        "deployment_id": deployment.id,
+        "project_id": project.id,
+        "project_name": project.name,
+        "repository_url": src.repository_url,
+        "branch": pushed_branch,
+        "commit_hash": commit_hash,
+        "dockerfile_path": src.dockerfile_path or "Dockerfile",
+        "compose_path": src.compose_path or "docker-compose.yml",
+        "image_tag": image_tag,
+        "version": version,
+        "environment_variables": env_vars
+    }
+
+    job = await create_and_dispatch_job(
+        db=db,
+        server_id=project.server_id,
+        job_type="deployment.git",
+        payload=job_payload,
+        deployment_id=deployment.id,
+        priority=20
+    )
+
+    log_activity(
+        db,
+        action="deployment.webhook_trigger",
+        resource_type="deployment",
+        resource_id=deployment.id,
+        user_id=project.owner_id,
+        details={"project": project.name, "version": version, "branch": pushed_branch, "job_id": job.id}
+    )
+
+    return {
+        "status": "triggered",
+        "message": f"Deployment v{version} started for {project.name}",
+        "deployment_id": deployment.id,
+        "version": version,
+        "job_id": job.id
+    }
 
 @router.get("/{deployment_id}", response_model=DeploymentResponse)
 def get_deployment(

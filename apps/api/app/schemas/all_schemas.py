@@ -79,6 +79,10 @@ class MetricsSnapshot(BaseModel):
     network_rx: float
     network_tx: float
     uptime: int
+    load_avg: Optional[List[float]] = None
+    cpu_cores: Optional[int] = None
+    container_stats: Optional[List[Dict[str, Any]]] = None
+    disk_partitions: Optional[List[Dict[str, Any]]] = None
     recorded_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -142,6 +146,10 @@ class MetricsReportRequest(BaseModel):
     network_rx_bytes_per_sec: float = 0.0
     network_tx_bytes_per_sec: float = 0.0
     uptime_seconds: int = 0
+    load_avg: Optional[List[float]] = None
+    cpu_cores: Optional[int] = None
+    container_stats: Optional[List[Dict[str, Any]]] = None
+    disk_partitions: Optional[List[Dict[str, Any]]] = None
 
 # --- Container Schemas ---
 class ContainerResponse(BaseModel):

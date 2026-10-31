@@ -275,6 +275,34 @@ def list_volumes(
         ]
     return volumes
 
+@router.post("/prune")
+async def prune_docker_system(
+    server_id: str,
+    all_images: bool = False,
+    current_user: User = Depends(require_role("owner", "admin")),
+    db: Session = Depends(get_db)
+):
+    server = db.query(Server).filter(Server.id == server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    job = await create_and_dispatch_job(
+        db=db,
+        server_id=server_id,
+        job_type="system.prune",
+        payload={"all_images": all_images}
+    )
+
+    log_activity(
+        db,
+        action="docker.prune",
+        resource_type="server",
+        resource_id=server_id,
+        user_id=current_user.id,
+        details={"all_images": all_images, "job_id": job.id}
+    )
+    return {"message": "Docker prune task dispatched to agent", "job_id": job.id}
+
 @router.get("/networks")
 def list_networks(
     server_id: str,

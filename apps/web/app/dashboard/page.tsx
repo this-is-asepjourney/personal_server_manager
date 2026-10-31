@@ -16,6 +16,9 @@ import {
   ShieldCheck,
   CheckCircle2,
   XCircle,
+  ExternalLink,
+  Globe,
+  Trash2,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 
@@ -170,6 +173,70 @@ export default function DashboardPage() {
             <CheckCircle2 className="w-3.5 h-3.5" />
             <span>Docker Engine healthy</span>
           </div>
+        </div>
+      </div>
+
+      {/* Homelab Services Hub Matrix */}
+      <div className="rounded-xl border border-border bg-card p-5 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-3">
+          <div className="flex items-center gap-2">
+            <Globe className="w-4 h-4 text-blue-500" />
+            <h2 className="font-bold text-sm text-foreground">Homelab Services Matrix</h2>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 font-mono">
+              Port Preserved
+            </span>
+          </div>
+          <p className="text-xs text-gray-500">
+            Dedicated homelab application endpoints running alongside PSM
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { name: 'Cockpit Admin', port: 9090, proto: 'https', desc: 'Host Linux Control', color: 'text-foreground' },
+            { name: 'Uptime Kuma', port: 3002, proto: 'http', desc: 'Uptime Monitor', color: 'text-emerald-500' },
+            { name: 'Grafana', port: 3001, proto: 'http', desc: 'Metrics Dashboard', color: 'text-amber-500' },
+            { name: 'Prometheus', port: 9001, proto: 'http', desc: 'Snap Time-series', color: 'text-orange-500' },
+            { name: 'Nextcloud', port: 80, proto: 'http', desc: 'Self-hosted Cloud', color: 'text-blue-500' },
+            { name: 'Mosquitto MQTT', port: 1883, proto: 'tcp', desc: 'IoT Broker', color: 'text-purple-500' },
+            { name: 'PSM Web UI', port: 3005, proto: 'http', desc: 'Control Plane', color: 'text-blue-600' },
+            { name: 'PSM API Docs', port: 8000, proto: 'http', path: '/docs', desc: 'FastAPI Swagger', color: 'text-indigo-500' },
+          ].map((svc) => {
+            const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+            const url = svc.proto === 'tcp' ? undefined : `${svc.proto}://${host}:${svc.port}${svc.path || ''}`;
+            return (
+              <div
+                key={svc.name}
+                className="p-3 rounded-lg border border-border bg-background/80 hover:bg-background transition-all flex flex-col justify-between space-y-2 group"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <span className="font-bold text-xs text-foreground block">{svc.name}</span>
+                    <span className="text-[10px] text-gray-400 block">{svc.desc}</span>
+                  </div>
+                  <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-card border border-border text-gray-400">
+                    :{svc.port}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-border/50">
+                  <span className="flex items-center gap-1 text-[10px] text-emerald-500">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Active
+                  </span>
+                  {url && (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-blue-500 hover:text-blue-400 flex items-center gap-0.5 group-hover:underline"
+                    >
+                      <span>Open</span>
+                      <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

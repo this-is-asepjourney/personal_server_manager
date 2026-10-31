@@ -12,6 +12,9 @@ import {
   ArrowLeft,
   Plus,
   Upload,
+  Copy,
+  Check,
+  GitBranch,
 } from 'lucide-react';
 import { api } from '../../../lib/api';
 
@@ -26,6 +29,7 @@ export default function ProjectDetailPage() {
   const [activeTab, setActiveTab] = useState<'overview' | 'deployments' | 'environment' | 'settings'>('deployments');
   const [loading, setLoading] = useState(true);
   const [deploying, setDeploying] = useState(false);
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // New env var form
@@ -318,24 +322,77 @@ export default function ProjectDetailPage() {
 
       {/* Tab: Overview / Source */}
       {activeTab === 'overview' && (
-        <div className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs font-mono">
-          <h3 className="font-bold text-sm font-sans text-foreground">Source & Build Configuration</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="p-3 rounded-lg bg-background border border-border">
-              <span className="text-gray-400 block mb-1">Source Type</span>
-              <span className="text-foreground capitalize">{project?.source_type}</span>
+        <div className="space-y-6">
+          <div className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs font-mono">
+            <h3 className="font-bold text-sm font-sans text-foreground">Source & Build Configuration</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="p-3 rounded-lg bg-background border border-border">
+                <span className="text-gray-400 block mb-1">Source Type</span>
+                <span className="text-foreground capitalize">{project?.source_type}</span>
+              </div>
+              <div className="p-3 rounded-lg bg-background border border-border">
+                <span className="text-gray-400 block mb-1">Repository URL</span>
+                <span className="text-foreground">{project?.repository_url || 'N/A (ZIP Upload)'}</span>
+              </div>
+              <div className="p-3 rounded-lg bg-background border border-border">
+                <span className="text-gray-400 block mb-1">Branch</span>
+                <span className="text-foreground">{project?.branch || 'main'}</span>
+              </div>
+              <div className="p-3 rounded-lg bg-background border border-border">
+                <span className="text-gray-400 block mb-1">Dockerfile Path</span>
+                <span className="text-foreground">{project?.dockerfile_path || 'Dockerfile'}</span>
+              </div>
             </div>
-            <div className="p-3 rounded-lg bg-background border border-border">
-              <span className="text-gray-400 block mb-1">Repository URL</span>
-              <span className="text-foreground">{project?.repository_url || 'N/A (ZIP Upload)'}</span>
+          </div>
+
+          {/* GitHub Auto-Deploy Webhook Card */}
+          <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-purple-500/10 text-purple-500">
+                <GitBranch className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-foreground">GitHub Webhook (Continuous Deployment to Docker)</h3>
+                <p className="text-xs text-gray-500">
+                  Automatically build and deploy directly to Docker every time you push code to GitHub.
+                </p>
+              </div>
             </div>
-            <div className="p-3 rounded-lg bg-background border border-border">
-              <span className="text-gray-400 block mb-1">Branch</span>
-              <span className="text-foreground">{project?.branch || 'main'}</span>
+
+            <div className="space-y-2 text-xs">
+              <label className="block text-gray-400 font-medium">Payload URL to configure in GitHub:</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={typeof window !== 'undefined' ? `${window.location.origin}/api/v1/deployments/webhook/${projectId}` : `/api/v1/deployments/webhook/${projectId}`}
+                  className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono select-all text-xs"
+                />
+                <button
+                  onClick={() => {
+                    if (typeof window !== 'undefined') {
+                      navigator.clipboard.writeText(`${window.location.origin}/api/v1/deployments/webhook/${projectId}`);
+                      setCopiedWebhook(true);
+                      setTimeout(() => setCopiedWebhook(false), 2000);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border hover:bg-card text-foreground transition-all"
+                >
+                  {copiedWebhook ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedWebhook ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
             </div>
-            <div className="p-3 rounded-lg bg-background border border-border">
-              <span className="text-gray-400 block mb-1">Dockerfile Path</span>
-              <span className="text-foreground">{project?.dockerfile_path || 'Dockerfile'}</span>
+
+            <div className="p-3.5 rounded-lg bg-background border border-border text-[11px] text-gray-500 space-y-1.5">
+              <div className="font-semibold text-foreground">Cara memasang Webhook di GitHub:</div>
+              <ol className="list-decimal list-inside space-y-1 text-gray-400">
+                <li>Buka repositori GitHub Anda &gt; <strong>Settings</strong> &gt; <strong>Webhooks</strong> &gt; <strong>Add webhook</strong>.</li>
+                <li>Tempel (Paste) URL di atas ke dalam kolom <strong>Payload URL</strong>.</li>
+                <li>Pilih Content type: <code>application/json</code>.</li>
+                <li>Pilih <em>&quot;Just the push event&quot;</em> lalu klik <strong>Add webhook</strong>.</li>
+                <li>Selesai! Setiap Anda <code>git push</code>, PSM otomatis meng-clone, mem-build, dan me-restart container Docker aplikasi Anda.</li>
+              </ol>
             </div>
           </div>
         </div>

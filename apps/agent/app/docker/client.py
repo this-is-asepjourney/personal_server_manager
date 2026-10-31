@@ -184,4 +184,46 @@ class DockerManager:
         except Exception as e:
             return f"Error reading logs: {e}"
 
+    def prune_system(self, all_images: bool = False) -> Dict[str, Any]:
+        """Prune unused containers, networks, and images to free disk space."""
+        try:
+            cmd = ["docker", "system", "prune", "-f"]
+            if all_images:
+                cmd.append("-a")
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+            return {
+                "success": res.returncode == 0,
+                "output": res.stdout.strip() if res.stdout else res.stderr.strip()
+            }
+        except Exception as e:
+            return {"success": False, "output": f"Prune failed: {e}"}
+
+    def get_all_container_stats(self) -> List[Dict[str, Any]]:
+        """Collect live CPU and Memory statistics for all running containers."""
+        if not self.is_available():
+            return []
+        try:
+            cmd = ["docker", "stats", "--no-stream", "--format", "{{json .}}"]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=8)
+            stats = []
+            for line in res.stdout.strip().split("\n"):
+                if not line.strip():
+                    continue
+                try:
+                    item = json.loads(line)
+                    stats.append({
+                        "container_id": item.get("ID", ""),
+                        "name": item.get("Name", ""),
+                        "cpu_percent": item.get("CPUPerc", "0.0%").replace("%", "").strip(),
+                        "mem_usage": item.get("MemUsage", "0B / 0B"),
+                        "mem_percent": item.get("MemPerc", "0.0%").replace("%", "").strip(),
+                        "net_io": item.get("NetIO", "0B / 0B"),
+                        "block_io": item.get("BlockIO", "0B / 0B")
+                    })
+                except Exception:
+                    pass
+            return stats
+        except Exception:
+            return []
+
 docker_manager = DockerManager()

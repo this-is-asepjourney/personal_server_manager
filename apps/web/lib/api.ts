@@ -206,6 +206,12 @@ export const api = {
     return res.json();
   },
 
+  async pruneServer(id: string, allImages = false) {
+    const res = await fetchWithAuth(`/api/v1/servers/${id}/prune?all_images=${allImages}`, { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to dispatch Docker prune');
+    return res.json();
+  },
+
   // Containers
   async getContainers(serverId: string) {
     const res = await fetchWithAuth(`/api/v1/servers/${serverId}/containers`);
