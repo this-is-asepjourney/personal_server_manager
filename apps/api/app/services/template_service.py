@@ -229,3 +229,4 @@ def get_template(template_id: str) -> Optional[Dict[str, Any]]:
         if t["id"] == template_id:
             return t
     return None
+

@@ -192,3 +192,4 @@ def check_metrics_and_alert(server_id: str, server_name: str, metrics: Dict[str,
             msg = f"Host **{server_name}** root disk partition reached **{disk:.1f}%** capacity (Threshold: {disk_thresh:.1f}%)."
             record_alert(server_id, server_name, "warning", title, msg)
             dispatch_external_alert(title, msg, level="warning")
+

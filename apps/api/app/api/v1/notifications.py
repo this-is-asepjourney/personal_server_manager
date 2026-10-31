@@ -77,3 +77,4 @@ def list_alerts(current_user: User = Depends(get_current_user)):
 def clear_all_alerts(current_user: User = Depends(require_role("owner", "admin"))):
     clear_alerts()
     return {"message": "All alerts cleared"}
+
