@@ -4,14 +4,15 @@ import shutil
 import zipfile
 from datetime import datetime, timezone
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Request
 from sqlalchemy.orm import Session
 from apps.api.app.database.session import get_db
 from apps.api.app.core.config import settings
-from apps.api.app.core.security import decrypt_secret
+from apps.api.app.core.security import encrypt_secret, decrypt_secret
 from apps.api.app.core.dependencies import get_current_user, require_role
 from apps.api.app.models.entities import (
     Project,
+    EnvironmentVariable,
     Deployment,
     DeploymentLog,
     Server,
@@ -77,6 +78,27 @@ async def create_git_deployment(
     if not src or not src.repository_url:
         raise HTTPException(status_code=400, detail="Project does not have a Git repository configured")
 
+    # Update port_mappings and env vars if provided in deploy payload
+    if payload.port_mappings:
+        project.port_mappings = payload.port_mappings.strip()
+
+    if payload.environment_variables:
+        for item in payload.environment_variables:
+            if item.key and item.key.strip():
+                existing = db.query(EnvironmentVariable).filter(
+                    EnvironmentVariable.project_id == project.id,
+                    EnvironmentVariable.key == item.key.strip()
+                ).first()
+                if existing:
+                    existing.encrypted_value = encrypt_secret(item.value)
+                else:
+                    db.add(EnvironmentVariable(
+                        project_id=project.id,
+                        key=item.key.strip(),
+                        encrypted_value=encrypt_secret(item.value)
+                    ))
+        db.commit()
+
     version = get_next_version(db, project.id)
     image_tag = f"{project.name.lower().replace(' ', '-')}:v{version}"
 
@@ -132,6 +154,7 @@ async def create_git_deployment(
         "commit_hash": payload.commit_hash,
         "dockerfile_path": src.dockerfile_path or "Dockerfile",
         "compose_path": src.compose_path or "docker-compose.yml",
+        "port_mappings": project.port_mappings or "3000:3000",
         "image_tag": image_tag,
         "version": version,
         "environment_variables": env_vars,
@@ -196,6 +219,8 @@ def create_upload_session(
 async def finalize_zip_upload(
     project_id: str,
     file: UploadFile = File(...),
+    port_mappings: Optional[str] = Form(None),
+    env_vars_json: Optional[str] = Form(None),
     current_user: User = Depends(require_role("owner", "admin", "operator")),
     db: Session = Depends(get_db)
 ):
@@ -205,6 +230,44 @@ async def finalize_zip_upload(
 
     if not file.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="Only .zip files are supported")
+
+    # Update port mappings if provided with upload
+    if port_mappings:
+        project.port_mappings = port_mappings.strip()
+
+    # Update environment variables if provided
+    if env_vars_json:
+        try:
+            import json
+            parsed = json.loads(env_vars_json)
+            if isinstance(parsed, list):
+                for item in parsed:
+                    k = item.get("key", "").strip()
+                    v = item.get("value", "")
+                    if k:
+                        existing = db.query(EnvironmentVariable).filter(
+                            EnvironmentVariable.project_id == project.id,
+                            EnvironmentVariable.key == k
+                        ).first()
+                        if existing:
+                            existing.encrypted_value = encrypt_secret(v)
+                        else:
+                            db.add(EnvironmentVariable(project_id=project.id, key=k, encrypted_value=encrypt_secret(v)))
+            elif isinstance(parsed, dict):
+                for k, v in parsed.items():
+                    k_str = str(k).strip()
+                    if k_str:
+                        existing = db.query(EnvironmentVariable).filter(
+                            EnvironmentVariable.project_id == project.id,
+                            EnvironmentVariable.key == k_str
+                        ).first()
+                        if existing:
+                            existing.encrypted_value = encrypt_secret(str(v))
+                        else:
+                            db.add(EnvironmentVariable(project_id=project.id, key=k_str, encrypted_value=encrypt_secret(str(v))))
+            db.commit()
+        except Exception:
+            pass
 
     # Save uploaded file
     target_filename = f"{project.id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}"
@@ -262,6 +325,7 @@ async def finalize_zip_upload(
         "version": version,
         "dockerfile_path": project.source.dockerfile_path if project.source else "Dockerfile",
         "compose_path": project.source.compose_path if project.source else "docker-compose.yml",
+        "port_mappings": project.port_mappings or "3000:3000",
         "environment_variables": env_vars,
         "database_config": db_info,
     }
@@ -371,6 +435,7 @@ async def github_webhook_trigger(
         "commit_hash": commit_hash,
         "dockerfile_path": src.dockerfile_path or "Dockerfile",
         "compose_path": src.compose_path or "docker-compose.yml",
+        "port_mappings": project.port_mappings or "3000:3000",
         "image_tag": image_tag,
         "version": version,
         "environment_variables": env_vars,

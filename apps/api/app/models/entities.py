@@ -107,6 +107,7 @@ class Project(Base):
     framework = Column(String(50), default="Node.js / Docker", nullable=False)
     source_type = Column(String(20), default="git", nullable=False)  # git, upload
     status = Column(String(30), default="active", nullable=False)  # active, stopped, failed
+    port_mappings = Column(String(255), default="3000:3000", nullable=True)
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     server = relationship("Server", back_populates="projects")

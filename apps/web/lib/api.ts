@@ -270,6 +270,18 @@ export const api = {
     return res.json();
   },
 
+  async updateProject(id: string, data: any) {
+    const res = await fetchWithAuth(`/api/v1/projects/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update project');
+    }
+    return res.json();
+  },
+
   async deleteProject(id: string) {
     const res = await fetchWithAuth(`/api/v1/projects/${id}`, { method: 'DELETE' });
     return res.json();
@@ -318,23 +330,50 @@ export const api = {
     return res.ok ? res.json() : null;
   },
 
-  async triggerGitDeployment(projectId: string, branch = 'main') {
+  async triggerGitDeployment(
+    projectId: string,
+    branch = 'main',
+    portMappings?: string,
+    envVars?: Array<{ key: string; value: string }>
+  ) {
     const res = await fetchWithAuth('/api/v1/deployments/git', {
       method: 'POST',
-      body: JSON.stringify({ project_id: projectId, branch }),
+      body: JSON.stringify({
+        project_id: projectId,
+        branch,
+        port_mappings: portMappings || undefined,
+        environment_variables: envVars || undefined,
+      }),
     });
-    if (!res.ok) throw new Error('Failed to trigger deployment');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to trigger deployment');
+    }
     return res.json();
   },
 
-  async uploadZipDeployment(projectId: string, file: File) {
+  async uploadZipDeployment(
+    projectId: string,
+    file: File,
+    portMappings?: string,
+    envVars?: Array<{ key: string; value: string }>
+  ) {
     const formData = new FormData();
     formData.append('file', file);
+    if (portMappings) {
+      formData.append('port_mappings', portMappings);
+    }
+    if (envVars && envVars.length > 0) {
+      formData.append('env_vars_json', JSON.stringify(envVars));
+    }
     const res = await fetchWithAuth(`/api/v1/deployments/${projectId}/finalize-upload`, {
       method: 'POST',
       body: formData,
     });
-    if (!res.ok) throw new Error('Failed to upload and deploy ZIP');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to upload and deploy ZIP');
+    }
     return res.json();
   },
 

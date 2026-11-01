@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   ArrowLeft,
   RotateCcw,
@@ -9,6 +10,8 @@ import {
   Terminal,
   Copy,
   Check,
+  FolderGit2,
+  Globe,
 } from 'lucide-react';
 import { api, formatDuration, getWsBase } from '../../../lib/api';
 
@@ -129,6 +132,15 @@ export default function DeploymentDetailPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {deployment?.project_id && (
+            <Link
+              href={`/projects/${deployment.project_id}`}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:bg-card text-foreground text-xs font-medium transition-colors"
+            >
+              <FolderGit2 className="w-3.5 h-3.5 text-blue-500" />
+              <span>Project</span>
+            </Link>
+          )}
           {isRunning && (
             <button
               onClick={handleCancel}

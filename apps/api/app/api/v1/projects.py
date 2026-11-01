@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -10,6 +11,7 @@ from apps.api.app.models.entities import (
     EnvironmentVariable,
     Server,
     Deployment,
+    DeploymentLog,
     Container,
     User,
 )
@@ -24,6 +26,7 @@ from apps.api.app.schemas.all_schemas import (
     ContainerResponse,
 )
 from apps.api.app.services.audit_service import log_activity
+from apps.api.app.services.job_service import create_and_dispatch_job
 from apps.api.app.services.db_provision_service import (
     provision_and_sync_project_db,
     resolve_project_db_name,
@@ -65,13 +68,14 @@ def list_projects(
                 branch=src.branch if src else None,
                 dockerfile_path=src.dockerfile_path if src else None,
                 compose_path=src.compose_path if src else None,
+                port_mappings=p.port_mappings or "3000:3000",
                 created_at=p.created_at
             )
         )
     return result
 
 @router.post("", response_model=ProjectResponse)
-def create_project(
+async def create_project(
     payload: ProjectCreate,
     current_user: User = Depends(require_role("owner", "admin")),
     db: Session = Depends(get_db)
@@ -87,6 +91,7 @@ def create_project(
         description=payload.description,
         framework=payload.framework,
         source_type=payload.source_type,
+        port_mappings=payload.port_mappings or "3000:3000",
         status="active"
     )
     db.add(project)
@@ -104,6 +109,19 @@ def create_project(
     db.add(source)
     db.commit()
 
+    # Save initial environment variables if provided
+    if payload.environment_variables:
+        for item in payload.environment_variables:
+            if item.key and item.key.strip():
+                encrypted = encrypt_secret(item.value or "")
+                db_var = EnvironmentVariable(
+                    project_id=project.id,
+                    key=item.key.strip(),
+                    encrypted_value=encrypted
+                )
+                db.add(db_var)
+        db.commit()
+
     # Auto-provision & auto-connect PostgreSQL database for the project
     db_info = {}
     if getattr(payload, "auto_provision_db", True):
@@ -117,6 +135,73 @@ def create_project(
         except Exception:
             pass
 
+    # Optional immediate deployment for Git projects
+    deployment_id = None
+    if payload.source_type == "git" and payload.repository_url and getattr(payload, "auto_deploy", True):
+        try:
+            version = 1
+            image_tag = f"{project.name.lower().replace(' ', '-')}:v{version}"
+            now = datetime.now(timezone.utc)
+            deployment = Deployment(
+                project_id=project.id,
+                version=version,
+                commit_hash="HEAD",
+                image_tag=image_tag,
+                status="building",
+                triggered_by=current_user.id,
+                started_at=now
+            )
+            db.add(deployment)
+            db.commit()
+            db.refresh(deployment)
+            deployment_id = deployment.id
+
+            db.add(
+                DeploymentLog(
+                    deployment_id=deployment.id,
+                    sequence=1,
+                    level="info",
+                    message=f"Deployment v1 dimulai otomatis via Git ({source.repository_url} @ {source.branch})"
+                )
+            )
+            db.commit()
+
+            # Retrieve all stored decrypted environment variables
+            env_items = db.query(EnvironmentVariable).filter(EnvironmentVariable.project_id == project.id).all()
+            full_env = {}
+            for item in env_items:
+                try:
+                    full_env[item.key] = decrypt_secret(item.encrypted_value)
+                except Exception:
+                    pass
+
+            job_payload = {
+                "deployment_id": deployment.id,
+                "project_id": project.id,
+                "project_name": project.name,
+                "repository_url": source.repository_url,
+                "branch": source.branch or "main",
+                "commit_hash": None,
+                "dockerfile_path": source.dockerfile_path or "Dockerfile",
+                "compose_path": source.compose_path or "docker-compose.yml",
+                "port_mappings": project.port_mappings or "3000:3000",
+                "image_tag": image_tag,
+                "version": version,
+                "environment_variables": full_env,
+                "database_config": db_info,
+            }
+
+            await create_and_dispatch_job(
+                db=db,
+                server_id=project.server_id,
+                job_type="deployment.git",
+                payload=job_payload,
+                deployment_id=deployment.id,
+                priority=20
+            )
+        except Exception:
+            pass
+
     log_activity(
         db,
         action="project.create",
@@ -126,8 +211,10 @@ def create_project(
         details={
             "name": project.name,
             "source_type": project.source_type,
+            "port_mappings": project.port_mappings,
             "database": db_info.get("db_name"),
             "db_auto_created": db_info.get("created", False),
+            "auto_deployed": deployment_id is not None,
         }
     )
 
@@ -145,6 +232,8 @@ def create_project(
         branch=source.branch,
         dockerfile_path=source.dockerfile_path,
         compose_path=source.compose_path,
+        port_mappings=project.port_mappings or "3000:3000",
+        deployment_id=deployment_id,
         created_at=project.created_at
     )
 
@@ -172,6 +261,7 @@ def get_project(
         branch=src.branch if src else None,
         dockerfile_path=src.dockerfile_path if src else None,
         compose_path=src.compose_path if src else None,
+        port_mappings=p.port_mappings or "3000:3000",
         created_at=p.created_at
     )
 
@@ -192,6 +282,8 @@ def update_project(
         p.description = payload.description
     if payload.framework is not None:
         p.framework = payload.framework
+    if payload.port_mappings is not None:
+        p.port_mappings = payload.port_mappings
 
     src = p.source
     if src:

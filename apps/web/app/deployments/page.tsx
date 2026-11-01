@@ -9,18 +9,26 @@ import {
   CheckCircle2,
   XCircle,
   RotateCcw,
+  Plus,
 } from 'lucide-react';
 import { api, formatDuration } from '../../lib/api';
+import { DeployProjectModal } from '../../components/deploy-project-modal';
 
 export default function DeploymentsPage() {
   const [deployments, setDeployments] = useState<any[]>([]);
+  const [servers, setServers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
 
   const loadDeployments = async () => {
     try {
       setLoading(true);
-      const list = await api.getDeployments();
+      const [list, s] = await Promise.all([
+        api.getDeployments().catch(() => []),
+        api.getServers().catch(() => []),
+      ]);
       setDeployments(list);
+      setServers(s);
     } catch (_) {
     } finally {
       setLoading(false);
@@ -41,13 +49,22 @@ export default function DeploymentsPage() {
             Audit releases, view live build logs, and manage rollbacks across projects.
           </p>
         </div>
-        <button
-          onClick={loadDeployments}
-          className="p-2 rounded-lg border border-border text-gray-500 hover:text-foreground hover:bg-card transition-all w-fit"
-          title="Refresh"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={loadDeployments}
+            className="p-2 rounded-lg border border-border text-gray-500 hover:text-foreground hover:bg-card transition-all w-fit"
+            title="Refresh"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          <button
+            onClick={() => setModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-md shadow-blue-600/20 transition-all"
+          >
+            <Rocket className="w-4 h-4" />
+            <span>Deploy Project Baru</span>
+          </button>
+        </div>
       </div>
 
       {/* Deployments Table */}
@@ -120,6 +137,13 @@ export default function DeploymentsPage() {
           </table>
         </div>
       </div>
+
+      <DeployProjectModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        servers={servers}
+        onSuccess={() => loadDeployments()}
+      />
     </div>
   );
 }

@@ -186,6 +186,18 @@ class ContainerResponse(BaseModel):
 class ContainerActionRequest(BaseModel):
     action: str  # start, stop, restart, remove
 
+class EnvironmentVariableItem(BaseModel):
+    key: str
+    value: str
+
+class EnvironmentUpdateRequest(BaseModel):
+    variables: List[EnvironmentVariableItem]
+
+class EnvironmentItemResponse(BaseModel):
+    key: str
+    masked_value: str
+    updated_at: datetime
+
 # --- Project Schemas ---
 class ProjectCreate(BaseModel):
     server_id: str
@@ -199,6 +211,9 @@ class ProjectCreate(BaseModel):
     compose_path: Optional[str] = "docker-compose.yml"
     auto_provision_db: bool = True
     database_name: Optional[str] = None
+    port_mappings: Optional[str] = "3000:3000"
+    environment_variables: Optional[List[EnvironmentVariableItem]] = None
+    auto_deploy: bool = True
 
 class ProjectDatabaseProvisionRequest(BaseModel):
     db_name: Optional[str] = None
@@ -212,18 +227,7 @@ class ProjectUpdate(BaseModel):
     branch: Optional[str] = None
     dockerfile_path: Optional[str] = None
     compose_path: Optional[str] = None
-
-class EnvironmentVariableItem(BaseModel):
-    key: str
-    value: str
-
-class EnvironmentUpdateRequest(BaseModel):
-    variables: List[EnvironmentVariableItem]
-
-class EnvironmentItemResponse(BaseModel):
-    key: str
-    masked_value: str
-    updated_at: datetime
+    port_mappings: Optional[str] = None
 
 class ProjectResponse(BaseModel):
     id: str
@@ -239,6 +243,8 @@ class ProjectResponse(BaseModel):
     branch: Optional[str] = None
     dockerfile_path: Optional[str] = None
     compose_path: Optional[str] = None
+    port_mappings: Optional[str] = "3000:3000"
+    deployment_id: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -248,6 +254,8 @@ class DeploymentCreateGit(BaseModel):
     project_id: str
     branch: Optional[str] = None
     commit_hash: Optional[str] = None
+    port_mappings: Optional[str] = None
+    environment_variables: Optional[List[EnvironmentVariableItem]] = None
 
 class DeploymentCreateCompose(BaseModel):
     project_id: str

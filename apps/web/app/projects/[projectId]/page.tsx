@@ -19,8 +19,11 @@ import {
   CheckCircle2,
   Table,
   HardDrive,
+  Globe,
+  ExternalLink,
 } from 'lucide-react';
 import { api, formatBytes } from '../../../lib/api';
+import { DeployProjectModal } from '../../../components/deploy-project-modal';
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -28,12 +31,16 @@ export default function ProjectDetailPage() {
   const projectId = params.projectId as string;
 
   const [project, setProject] = useState<any>(null);
+  const [servers, setServers] = useState<any[]>([]);
   const [deployments, setDeployments] = useState<any[]>([]);
   const [envVars, setEnvVars] = useState<any[]>([]);
   const [dbInfo, setDbInfo] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'deployments' | 'database' | 'environment' | 'settings'>('deployments');
   const [loading, setLoading] = useState(true);
   const [deploying, setDeploying] = useState(false);
+  const [deployModalOpen, setDeployModalOpen] = useState(false);
+  const [portMappingsInput, setPortMappingsInput] = useState('');
+  const [savingPorts, setSavingPorts] = useState(false);
   const [provisioningDb, setProvisioningDb] = useState(false);
   const [customDbName, setCustomDbName] = useState('');
   const [copiedWebhook, setCopiedWebhook] = useState(false);
@@ -47,16 +54,19 @@ export default function ProjectDetailPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [p, d, env, dbData] = await Promise.all([
+      const [p, d, env, dbData, s] = await Promise.all([
         api.getProject(projectId),
         api.getDeployments().then((list) => list.filter((item: any) => item.project_id === projectId)),
         api.getProjectEnvironment(projectId),
         api.getProjectDatabase(projectId),
+        api.getServers().catch(() => []),
       ]);
       setProject(p);
       setDeployments(d);
       setEnvVars(env);
       setDbInfo(dbData);
+      setServers(s);
+      setPortMappingsInput(p?.port_mappings || '3000:3000');
       if (dbData?.db_name && !customDbName) {
         setCustomDbName(dbData.db_name);
       }
@@ -118,6 +128,21 @@ export default function ProjectDetailPage() {
     }
   };
 
+  const handleSavePortMappings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!portMappingsInput.trim()) return;
+    try {
+      setSavingPorts(true);
+      await api.updateProject(projectId, { port_mappings: portMappingsInput.trim() });
+      await loadData();
+      alert('Port mappings Docker berhasil diperbarui!');
+    } catch (err: any) {
+      alert(err.message || 'Gagal memperbarui port mappings');
+    } finally {
+      setSavingPorts(false);
+    }
+  };
+
   const handleAddEnvVar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newKey) return;
@@ -136,6 +161,10 @@ export default function ProjectDetailPage() {
     return <div className="p-8 text-center text-gray-500">Project not found.</div>;
   }
 
+  const hostPortOnly = (project?.port_mappings || '3000:3000').split(':')[0]?.trim();
+  const targetServer = servers.find((s) => s.id === project?.server_id);
+  const serverHost = targetServer?.hostname || 'localhost';
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -153,10 +182,14 @@ export default function ProjectDetailPage() {
               <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
                 {project?.status}
               </span>
+              <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                <Globe className="w-3 h-3" />
+                <span>Port: {project?.port_mappings || '3000:3000'}</span>
+              </span>
               {dbInfo && (
                 <button
                   onClick={() => setActiveTab('database')}
-                  className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-blue-500/10 text-blue-500 border border-blue-500/20 hover:bg-blue-500/20 transition-colors"
+                  className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors"
                 >
                   <Database className="w-3 h-3" />
                   <span>PG: {dbInfo.db_name}</span>
@@ -169,28 +202,36 @@ export default function ProjectDetailPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".zip"
-            onChange={handleZipUpload}
-            className="hidden"
-          />
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {/* External Access Link if container port is available */}
+          {hostPortOnly && (
+            <a
+              href={`http://${serverHost}:${hostPortOnly}`}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 text-xs font-semibold transition-colors shadow-sm"
+              title="Buka aplikasi di tab baru"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>Akses App</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
+
           <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={deploying}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-border hover:bg-card text-foreground text-xs font-medium transition-all disabled:opacity-50"
+            onClick={() => setDeployModalOpen(true)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md shadow-blue-600/20 transition-all"
           >
-            <Upload className="w-3.5 h-3.5 text-purple-500" />
-            <span>Deploy ZIP</span>
+            <Rocket className="w-4 h-4" />
+            <span>Deploy Release</span>
           </button>
+
           <button
             onClick={handleTriggerDeploy}
             disabled={deploying}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium shadow-md shadow-blue-600/20 transition-all disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border hover:bg-card text-foreground text-xs font-medium transition-all disabled:opacity-50"
+            title="Deploy commit terbaru"
           >
-            <Rocket className="w-4 h-4" />
             <span>{deploying ? 'Deploying...' : 'Deploy Latest'}</span>
           </button>
         </div>
@@ -497,6 +538,44 @@ export default function ProjectDetailPage() {
       {/* Tab: Overview / Source */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
+          {/* Docker Network & Port Mappings Card */}
+          <div className="rounded-xl border border-blue-500/20 bg-card p-5 space-y-4 text-xs font-mono">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 font-sans font-bold text-sm text-foreground">
+                <Globe className="w-4 h-4 text-blue-500" />
+                <span>Docker Port Mapping & Network</span>
+              </div>
+              {hostPortOnly && (
+                <a
+                  href={`http://${serverHost}:${hostPortOnly}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-sans font-medium transition-colors"
+                >
+                  <span>Buka di Browser</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-3 rounded-lg bg-background border border-border">
+                <span className="text-gray-400 block mb-1">Mapping Konfigurasi</span>
+                <span className="text-blue-500 font-bold text-sm">{project?.port_mappings || '3000:3000'}</span>
+              </div>
+              <div className="p-3 rounded-lg bg-background border border-border">
+                <span className="text-gray-400 block mb-1">Server Host URL</span>
+                <span className="text-foreground">
+                  http://{serverHost}:{hostPortOnly}
+                </span>
+              </div>
+              <div className="p-3 rounded-lg bg-background border border-border">
+                <span className="text-gray-400 block mb-1">Network Docker</span>
+                <span className="text-emerald-500">psm-network (bridge)</span>
+              </div>
+            </div>
+          </div>
+
           <div className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs font-mono">
             <h3 className="font-bold text-sm font-sans text-foreground">Source & Build Configuration</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -574,21 +653,91 @@ export default function ProjectDetailPage() {
 
       {/* Tab: Settings */}
       {activeTab === 'settings' && (
-        <div className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs">
-          <h3 className="font-bold text-sm text-foreground">Project Danger Zone</h3>
-          <p className="text-gray-500">Removing this project will stop all associated releases.</p>
-          <button
-            onClick={() => {
-              if (confirm('Delete this project?')) {
-                api.deleteProject(projectId).then(() => router.push('/projects'));
-              }
-            }}
-            className="px-4 py-2 rounded-lg bg-rose-600/10 hover:bg-rose-600/20 text-rose-600 font-medium"
-          >
-            Delete Project Permanently
-          </button>
+        <div className="space-y-6">
+          {/* Port Mappings Form */}
+          <div className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs">
+            <div>
+              <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
+                <Globe className="w-4 h-4 text-blue-500" />
+                <span>Konfigurasi Port Mapping Docker</span>
+              </h3>
+              <p className="text-gray-500 mt-0.5">
+                Ubah port host dan port internal container yang diekspos oleh Docker saat deployment berikutnya.
+              </p>
+            </div>
+
+            <form onSubmit={handleSavePortMappings} className="space-y-3">
+              <div>
+                <label className="block text-gray-400 font-medium mb-1">
+                  Port Mapping (Format: <code>HOST_PORT:CONTAINER_PORT</code>):
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={portMappingsInput}
+                    onChange={(e) => setPortMappingsInput(e.target.value)}
+                    placeholder="3000:3000"
+                    className="flex-1 px-3 py-2 rounded-lg bg-background border border-border text-foreground font-mono text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={savingPorts}
+                    className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium disabled:opacity-50 transition-colors"
+                  >
+                    {savingPorts ? 'Menyimpan...' : 'Simpan Port'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick Preset Buttons */}
+              <div className="flex flex-wrap gap-2 pt-1 text-[11px]">
+                <span className="text-gray-500 self-center">Preset:</span>
+                {[
+                  '3000:3000',
+                  '8080:80',
+                  '8000:8000',
+                  '5000:5000',
+                  '80:80',
+                ].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setPortMappingsInput(preset)}
+                    className="px-2.5 py-1 rounded-lg border border-border hover:bg-background text-gray-400 hover:text-foreground font-mono"
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+            </form>
+          </div>
+
+          {/* Danger Zone */}
+          <div className="rounded-xl border border-border bg-card p-5 space-y-4 text-xs">
+            <h3 className="font-bold text-sm text-foreground">Project Danger Zone</h3>
+            <p className="text-gray-500">Removing this project will stop all associated releases.</p>
+            <button
+              onClick={() => {
+                if (confirm('Delete this project?')) {
+                  api.deleteProject(projectId).then(() => router.push('/projects'));
+                }
+              }}
+              className="px-4 py-2 rounded-lg bg-rose-600/10 hover:bg-rose-600/20 text-rose-600 font-medium"
+            >
+              Delete Project Permanently
+            </button>
+          </div>
         </div>
       )}
+
+      {/* Deploy Release Modal */}
+      <DeployProjectModal
+        isOpen={deployModalOpen}
+        onClose={() => setDeployModalOpen(false)}
+        servers={servers}
+        existingProject={project}
+        onSuccess={() => loadData()}
+      />
     </div>
   );
 }

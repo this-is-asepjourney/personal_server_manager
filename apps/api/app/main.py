@@ -35,6 +35,22 @@ def _wait_for_database(max_attempts: int = 15, delay: float = 2.0):
 def init_db():
     _wait_for_database()
     Base.metadata.create_all(bind=db_session.engine)
+
+    # Safe column migration for existing databases
+    try:
+        from sqlalchemy import text
+        with db_session.engine.connect() as conn:
+            try:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS port_mappings VARCHAR(255);"))
+                conn.commit()
+            except Exception:
+                try:
+                    conn.execute(text("ALTER TABLE projects ADD COLUMN port_mappings VARCHAR(255);"))
+                    conn.commit()
+                except Exception:
+                    pass
+    except Exception:
+        pass
     db = db_session.SessionLocal()
     try:
         # Seed default admin user

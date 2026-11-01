@@ -4,7 +4,7 @@ import zipfile
 import subprocess
 import re
 import time
-from typing import Callable, Optional, Dict, Any, List
+from typing import Callable, Optional, Dict, Any, List, Tuple
 
 
 class DeploymentEngine:
@@ -465,48 +465,228 @@ class DeploymentEngine:
             return False
 
     @staticmethod
-    def _extract_port_args(full_df_path: str, workspace_dir: str, log_callback: Callable[[str, str], None]) -> List[str]:
-        port_args: List[str] = []
-        env_dict = DeploymentEngine._load_env_dict(workspace_dir)
-        explicit_port = env_dict.get("PORT") or env_dict.get("HOST_PORT")
-        if explicit_port and explicit_port.isdigit():
-            port_args.extend(["-p", f"{explicit_port}:{explicit_port}"])
-            log_callback("info", f"[Docker] Mapping port {explicit_port}:{explicit_port} from environment configuration")
-            return port_args
+    def parse_port_mappings(
+        explicit_mappings: Optional[str],
+        full_df_path: str,
+        workspace_dir: str,
+        log_callback: Callable[[str, str], None]
+    ) -> Tuple[List[str], Dict[str, int], int]:
+        """
+        Parses port configuration with priority:
+        1. Explicit port_mappings string (e.g. '8080:3000', '8080:80, 8443:443', '3000')
+        2. Environment variables (HOST_PORT, PORT)
+        3. EXPOSE instruction in Dockerfile
+        4. Default 3000:3000
+        """
+        cli_args: List[str] = []
+        sdk_ports: Dict[str, int] = {}
+        primary_container_port = 3000
+        parsed_any = False
 
-        try:
-            with open(full_df_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
-                matches = re.findall(r"EXPOSE\s+(\d+)", content, re.IGNORECASE)
-                for port in matches:
-                    port_args.extend(["-p", f"{port}:{port}"])
-                    log_callback("info", f"[Docker] Detected EXPOSE {port}, mapping to host port {port}")
-        except Exception:
-            pass
-        return port_args
+        # 1. Explicit port mappings
+        if explicit_mappings and str(explicit_mappings).strip():
+            raw_entries = [p.strip() for p in str(explicit_mappings).split(",") if p.strip()]
+            for entry in raw_entries:
+                parts = entry.split(":")
+                try:
+                    if len(parts) == 1:
+                        hp = int(parts[0])
+                        cp = hp
+                    elif len(parts) == 2:
+                        hp = int(parts[0])
+                        cp = int(parts[1])
+                    elif len(parts) >= 3:
+                        hp = int(parts[-2])
+                        cp = int(parts[-1])
+                    else:
+                        continue
+
+                    cli_args.extend(["-p", f"{hp}:{cp}"])
+                    sdk_ports[f"{cp}/tcp"] = hp
+                    if not parsed_any:
+                        primary_container_port = cp
+                    parsed_any = True
+                    log_callback("info", f"[Docker] Port Mapping: Host {hp} -> Container {cp}")
+                except ValueError:
+                    continue
+
+        # 2. Check .env for PORT or HOST_PORT
+        if not parsed_any:
+            env_dict = DeploymentEngine._load_env_dict(workspace_dir)
+            p_val = env_dict.get("HOST_PORT") or env_dict.get("PORT")
+            if p_val:
+                try:
+                    if ":" in p_val:
+                        hp_str, cp_str = p_val.split(":", 1)
+                        hp, cp = int(hp_str), int(cp_str)
+                    else:
+                        hp = int(p_val)
+                        cp = hp
+                    cli_args.extend(["-p", f"{hp}:{cp}"])
+                    sdk_ports[f"{cp}/tcp"] = hp
+                    primary_container_port = cp
+                    parsed_any = True
+                    log_callback("info", f"[Docker] Port dari konfigurasi .env: Host {hp} -> Container {cp}")
+                except ValueError:
+                    pass
+
+        # 3. Check Dockerfile EXPOSE
+        if not parsed_any and os.path.exists(full_df_path):
+            try:
+                with open(full_df_path, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+                    matches = re.findall(r"EXPOSE\s+(\d+)", content, re.IGNORECASE)
+                    for port in matches:
+                        p = int(port)
+                        cli_args.extend(["-p", f"{p}:{p}"])
+                        sdk_ports[f"{p}/tcp"] = p
+                        if not parsed_any:
+                            primary_container_port = p
+                        parsed_any = True
+                        log_callback("info", f"[Docker] Terdeteksi EXPOSE {p} pada Dockerfile: Host {p} -> Container {p}")
+            except Exception:
+                pass
+
+        # 4. Fallback default
+        if not parsed_any:
+            cli_args.extend(["-p", "3000:3000"])
+            sdk_ports["3000/tcp"] = 3000
+            primary_container_port = 3000
+            log_callback("info", "[Docker] Port default: Mapping Host 3000 -> Container 3000")
+
+        return cli_args, sdk_ports, primary_container_port
+
+    @staticmethod
+    def ensure_dockerfile_or_generate(
+        workspace_dir: str,
+        dockerfile_path: str,
+        compose_path: str,
+        container_port: int,
+        log_callback: Callable[[str, str], None],
+    ) -> str:
+        """
+        Ensure workspace has a buildable Dockerfile or Docker Compose file.
+        If missing, detect project type and auto-generate an optimized Dockerfile.
+        """
+        full_compose = os.path.join(workspace_dir, compose_path)
+        if os.path.exists(full_compose):
+            return compose_path
+
+        full_df = os.path.join(workspace_dir, dockerfile_path)
+        if os.path.exists(full_df):
+            return dockerfile_path
+
+        root_df = os.path.join(workspace_dir, "Dockerfile")
+        if os.path.exists(root_df):
+            return "Dockerfile"
+
+        # Detect tech stack
+        detected_fw = "Generic Web App"
+        generated_content = ""
+
+        pkg_json = os.path.join(workspace_dir, "package.json")
+        req_txt = os.path.join(workspace_dir, "requirements.txt")
+        py_files = [f for f in ("main.py", "app.py", "manage.py") if os.path.exists(os.path.join(workspace_dir, f))]
+        composer_json = os.path.join(workspace_dir, "composer.json")
+        index_html = os.path.join(workspace_dir, "index.html")
+
+        if os.path.exists(pkg_json):
+            is_next = False
+            try:
+                with open(pkg_json, "r", encoding="utf-8", errors="ignore") as f:
+                    raw_pkg = f.read().lower()
+                    if '"next"' in raw_pkg:
+                        is_next = True
+            except Exception:
+                pass
+
+            if is_next:
+                detected_fw = "Next.js"
+                generated_content = (
+                    "FROM node:20-alpine\n"
+                    "WORKDIR /app\n"
+                    "COPY package*.json ./\n"
+                    "RUN npm install --legacy-peer-deps\n"
+                    "COPY . .\n"
+                    f"ENV PORT={container_port}\n"
+                    "ENV NODE_ENV=production\n"
+                    "RUN npm run build || true\n"
+                    f"EXPOSE {container_port}\n"
+                    "CMD [\"npm\", \"start\"]\n"
+                )
+            else:
+                detected_fw = "Node.js"
+                generated_content = (
+                    "FROM node:20-alpine\n"
+                    "WORKDIR /app\n"
+                    "COPY package*.json ./\n"
+                    "RUN npm install --legacy-peer-deps\n"
+                    "COPY . .\n"
+                    f"ENV PORT={container_port}\n"
+                    f"EXPOSE {container_port}\n"
+                    "CMD [\"npm\", \"start\"]\n"
+                )
+        elif os.path.exists(req_txt) or py_files:
+            detected_fw = "Python"
+            cmd_line = f"python -m uvicorn main:app --host 0.0.0.0 --port {container_port}" if "main.py" in py_files else (f"python app.py" if "app.py" in py_files else f"python -m http.server {container_port}")
+            generated_content = (
+                "FROM python:3.11-slim\n"
+                "WORKDIR /app\n"
+                "RUN apt-get update && apt-get install -y --no-install-recommends libpq-dev gcc build-essential curl && rm -rf /var/lib/apt/lists/*\n"
+                "COPY requirements.txt* ./\n"
+                "RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi\n"
+                "COPY . .\n"
+                f"ENV PORT={container_port}\n"
+                f"EXPOSE {container_port}\n"
+                f"CMD [\"sh\", \"-c\", \"{cmd_line}\"]\n"
+            )
+        elif os.path.exists(composer_json) or os.path.exists(os.path.join(workspace_dir, "artisan")):
+            detected_fw = "PHP / Laravel"
+            generated_content = (
+                "FROM php:8.2-cli-alpine\n"
+                "WORKDIR /var/www/html\n"
+                "RUN apk add --no-cache libpq-dev postgresql-client\n"
+                "RUN docker-php-ext-install pdo pdo_pgsql\n"
+                "COPY . .\n"
+                f"ENV PORT={container_port}\n"
+                f"EXPOSE {container_port}\n"
+                f"CMD [\"php\", \"-S\", \"0.0.0.0:{container_port}\", \"-t\", \"public\"]\n"
+            )
+        elif os.path.exists(index_html):
+            detected_fw = "Static HTML / Web"
+            generated_content = (
+                "FROM nginx:alpine\n"
+                "COPY . /usr/share/nginx/html\n"
+                "EXPOSE 80\n"
+                "CMD [\"nginx\", \"-g\", \"daemon off;\"]\n"
+            )
+        else:
+            detected_fw = "Standard Web Container"
+            generated_content = (
+                "FROM python:3.11-alpine\n"
+                "WORKDIR /app\n"
+                "COPY . .\n"
+                f"ENV PORT={container_port}\n"
+                f"EXPOSE {container_port}\n"
+                f"CMD [\"python\", \"-m\", \"http.server\", \"{container_port}\"]\n"
+            )
+
+        target_file = os.path.join(workspace_dir, "Dockerfile")
+        with open(target_file, "w", encoding="utf-8", newline="\n") as f:
+            f.write(generated_content)
+
+        log_callback("info", f"[Docker] Dockerfile tidak ditemukan di project — Otomatis membuat Dockerfile optimal untuk stack '{detected_fw}' (Port: {container_port}).")
+        return "Dockerfile"
+
+    @staticmethod
+    def _extract_port_args(full_df_path: str, workspace_dir: str, log_callback: Callable[[str, str], None]) -> List[str]:
+        cli_args, _, _ = DeploymentEngine.parse_port_mappings(None, full_df_path, workspace_dir, log_callback)
+        return cli_args
 
     @staticmethod
     def _extract_ports_dict(full_df_path: str, workspace_dir: str, log_callback: Callable[[str, str], None]) -> Dict[str, int]:
-        ports: Dict[str, int] = {}
-        env_dict = DeploymentEngine._load_env_dict(workspace_dir)
-        explicit_port = env_dict.get("PORT") or env_dict.get("HOST_PORT")
-        if explicit_port and explicit_port.isdigit():
-            p = int(explicit_port)
-            ports[f"{p}/tcp"] = p
-            log_callback("info", f"[Docker-SDK] Mapping container port {p} from environment")
-            return ports
-
-        try:
-            with open(full_df_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
-                matches = re.findall(r"EXPOSE\s+(\d+)", content, re.IGNORECASE)
-                for port in matches:
-                    p = int(port)
-                    ports[f"{p}/tcp"] = p
-                    log_callback("info", f"[Docker-SDK] Detected EXPOSE {p}, mapping port")
-        except Exception:
-            pass
-        return ports
+        _, sdk_ports, _ = DeploymentEngine.parse_port_mappings(None, full_df_path, workspace_dir, log_callback)
+        return sdk_ports
 
     @staticmethod
     def _load_env_dict(workspace_dir: str) -> Dict[str, str]:
@@ -550,7 +730,8 @@ class DeploymentEngine:
         dockerfile_path: str,
         image_tag: str,
         container_name: str,
-        log_callback: Callable[[str, str], None]
+        log_callback: Callable[[str, str], None],
+        port_mappings: Optional[str] = None
     ) -> bool:
         """Build image using Dockerfile and launch container directly.
         Automatically attaches container to the PostgreSQL Docker network (psm-network)
@@ -567,6 +748,18 @@ class DeploymentEngine:
         sanitized_tag = re.sub(r"[^a-z0-9_.:-]", "-", image_tag.lower())
         sanitized_name = re.sub(r"[^a-zA-Z0-9_.-]", "-", container_name.lower())
         target_network = DeploymentEngine._resolve_psm_network_name()
+
+        # Parse ports & ensure PORT env
+        port_args, ports_mapping, primary_port = DeploymentEngine.parse_port_mappings(
+            explicit_mappings=port_mappings,
+            full_df_path=full_df_path,
+            workspace_dir=workspace_dir,
+            log_callback=log_callback
+        )
+        env_dict = DeploymentEngine._load_env_dict(workspace_dir)
+        if "PORT" not in env_dict:
+            env_dict["PORT"] = str(primary_port)
+            DeploymentEngine.write_env_file(workspace_dir, env_dict)
 
         # 1. Check if Docker CLI is available
         docker_bin = shutil.which("docker") or "/usr/bin/docker"
@@ -603,7 +796,6 @@ class DeploymentEngine:
             subprocess.run([docker_bin, "rm", "-f", sanitized_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
             # Ports, Network & Run
-            port_args = DeploymentEngine._extract_port_args(full_df_path, workspace_dir, log_callback)
             run_cmd = [
                 docker_bin, "run", "-d",
                 "--restart", "unless-stopped",
@@ -675,8 +867,7 @@ class DeploymentEngine:
             except Exception:
                 pass
 
-            # Extract ports & environment variables
-            ports_mapping = DeploymentEngine._extract_ports_dict(full_df_path, workspace_dir, log_callback)
+            # Environment variables
             env_dict = DeploymentEngine._load_env_dict(workspace_dir)
 
             if target_network:
