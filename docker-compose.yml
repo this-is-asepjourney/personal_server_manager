@@ -26,7 +26,7 @@ services:
     env_file:
       - .env.example
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "${API_PORT:-8001}:8000"
     environment:
       # Connects to PostgreSQL (100.106.63.90:5432 / psm-postgres) as appuser and auto-creates database 'psm' if missing.
       - POSTGRES_DB=${POSTGRES_DB:-psm}
@@ -42,6 +42,9 @@ services:
       - ENCRYPTION_MASTER_KEY=${ENCRYPTION_MASTER_KEY:-dGhpcy1pcy1hLXNhbXBsZS1mZXJuZXQta2V5LTMyeS0=}
       - HOMELAB_AGENT_TOKEN=${HOMELAB_AGENT_TOKEN:-psm_agent_homelab_default_token}
       - PROMETHEUS_URL=${PROMETHEUS_URL:-http://host.docker.internal:9001}
+      - PAP_API_URL=${PAP_API_URL:-http://192.168.25.101:8000}
+      - PAP_API_KEY=${PAP_API_KEY:-pap_key_psm_control_plane_default_secret_key_2026}
+      - IOT_DASHBOARD_URL=${IOT_DASHBOARD_URL:-http://192.168.25.101:8088}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

@@ -26,6 +26,7 @@ from apps.api.app.schemas.all_schemas import (
     ContainerResponse,
 )
 from apps.api.app.services.audit_service import log_activity
+from apps.api.app.services.pap_client import sync_psm_to_pap
 from apps.api.app.services.job_service import create_and_dispatch_job
 from apps.api.app.services.db_provision_service import (
     provision_and_sync_project_db,
@@ -215,6 +216,7 @@ async def create_project(
             "database": db_info.get("db_name"),
             "db_auto_created": db_info.get("created", False),
             "auto_deployed": deployment_id is not None,
+            "pap_synced": bool(sync_psm_to_pap(db)),
         }
     )
 

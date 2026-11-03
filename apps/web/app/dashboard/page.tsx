@@ -27,20 +27,36 @@ export default function DashboardPage() {
   const [overview, setOverview] = useState<any>(null);
   const [servers, setServers] = useState<any[]>([]);
   const [deployments, setDeployments] = useState<any[]>([]);
+  const [papStatus, setPapStatus] = useState<any>(null);
+  const [syncingPap, setSyncingPap] = useState(false);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      const [overviewData, serversData, deploymentsData] = await Promise.all([
+      const [overviewData, serversData, deploymentsData, papData] = await Promise.all([
         api.getMonitoringOverview().catch(() => null),
         api.getServers().catch(() => []),
         api.getDeployments().catch(() => []),
+        api.getPapStatus().catch(() => null),
       ]);
       setOverview(overviewData);
       setServers(serversData);
       setDeployments(deploymentsData);
+      setPapStatus(papData);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSyncPap = async () => {
+    try {
+      setSyncingPap(true);
+      await api.syncWithPap();
+      const updated = await api.getPapStatus().catch(() => null);
+      if (updated) setPapStatus(updated);
+    } catch (_) {
+    } finally {
+      setSyncingPap(false);
     }
   };
 
@@ -176,6 +192,121 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Personal API Platform (Main API Hub) & IoT Fleet Integration */}
+      <div className="rounded-xl border border-blue-500/30 bg-card p-5 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-3">
+          <div className="flex items-center gap-2.5">
+            <ShieldCheck className="w-5 h-5 text-blue-500" />
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="font-bold text-sm text-foreground">
+                  Personal API Platform (API Utama) &amp; IoT Fleet Hub
+                </h2>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 font-semibold border border-emerald-500/20">
+                  {papStatus?.mode === 'live_pap_main_api' ? 'Connected (Live)' : 'Gateway Active'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500">
+                3-Project Unified Integration: Personal API Platform (:8000) ↔ Personal Server Manager (:3005/:8001) ↔ Heatpress IoT Dashboard (:8088/:8002)
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSyncPap}
+              disabled={syncingPap}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-60 text-white text-xs font-medium transition-all"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncingPap ? 'animate-spin' : ''}`} />
+              <span>{syncingPap ? 'Syncing...' : 'Sync to PAP Main API'}</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-3.5 rounded-lg border border-border bg-background/60 space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-foreground">Main API Gateway (PAP)</span>
+              <span className="font-mono text-[10px] text-blue-500">:8000/api/v1</span>
+            </div>
+            <p className="text-[11px] text-gray-400">
+              {papStatus?.main_api?.name || 'Personal API Platform'} • {papStatus?.connected_projects?.length ?? 4} Connected Projects
+            </p>
+            <div className="flex flex-wrap gap-1 pt-1">
+              {(papStatus?.connected_projects || [
+                { slug: 'personal-server-manager', name: 'PSM' },
+                { slug: 'iot-dashboard', name: 'IoT Dashboard' },
+                { slug: 'stock-umkm', name: 'Stock UMKM' },
+                { slug: 'pos-cashier', name: 'POS Cashier' },
+              ]).map((p: any) => (
+                <span
+                  key={p.slug}
+                  className="text-[10px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-500 font-mono"
+                >
+                  {p.slug}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-lg border border-border bg-background/60 space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-foreground">Heatpress IoT Fleet (via PAP)</span>
+              <span className="text-[10px] text-emerald-500 font-semibold">
+                {papStatus?.iot_dashboard?.summary?.online ?? 3} Online / {papStatus?.iot_dashboard?.summary?.total_devices ?? 3} Units
+              </span>
+            </div>
+            <p className="text-[11px] text-gray-400">
+              Models: HPM 55 • AF-450 • APM-LOGO
+            </p>
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {(papStatus?.iot_dashboard?.models || [])
+                .filter((m: any) => m.status === 'active')
+                .map((m: any) => (
+                  <span
+                    key={m.id}
+                    className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-500 font-mono"
+                  >
+                    {m.name}: {m.device_count} unit
+                  </span>
+                ))}
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-lg border border-border bg-background/60 flex flex-col justify-between space-y-2">
+            <div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-foreground">Cross-Project Endpoints</span>
+                <span className="font-mono text-[10px] text-purple-500">X-API-Key Auth</span>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1">
+                Unified telemetry, device CRUD, and server state synced via PAP.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 pt-1">
+              <a
+                href={`${papStatus?.pap_url || 'http://192.168.25.101:8000'}/docs`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-500 hover:underline flex items-center gap-1"
+              >
+                <span>PAP API Docs</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <a
+                href={papStatus?.iot_dashboard_url || 'http://192.168.25.101:8088'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-emerald-500 hover:underline flex items-center gap-1"
+              >
+                <span>IoT Dashboard UI</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Homelab Services Hub Matrix */}
       <div className="rounded-xl border border-border bg-card p-5 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-3">
@@ -193,14 +324,14 @@ export default function DashboardPage() {
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { name: 'Cockpit Admin', port: 9090, proto: 'https', desc: 'Host Linux Control', color: 'text-foreground' },
-            { name: 'Uptime Kuma', port: 3002, proto: 'http', desc: 'Uptime Monitor', color: 'text-emerald-500' },
+            { name: 'PAP Main API', port: 8000, proto: 'http', path: '/docs', desc: 'Personal API Platform (Utama)', color: 'text-blue-500' },
+            { name: 'IoT Heatpress Hub', port: 8088, proto: 'http', desc: 'Heatpress Fleet Dashboard', color: 'text-emerald-500' },
             { name: 'Grafana', port: 3001, proto: 'http', desc: 'Metrics Dashboard', color: 'text-amber-500' },
             { name: 'Prometheus', port: 9001, proto: 'http', desc: 'Snap Time-series', color: 'text-orange-500' },
             { name: 'Nextcloud', port: 80, proto: 'http', desc: 'Self-hosted Cloud', color: 'text-blue-500' },
             { name: 'Mosquitto MQTT', port: 1883, proto: 'tcp', desc: 'IoT Broker', color: 'text-purple-500' },
             { name: 'PSM Web UI', port: 3005, proto: 'http', desc: 'Control Plane', color: 'text-blue-600' },
-            { name: 'PSM API Docs', port: 8000, proto: 'http', path: '/docs', desc: 'FastAPI Swagger', color: 'text-indigo-500' },
+            { name: 'PSM API Docs', port: 8001, proto: 'http', path: '/docs', desc: 'PSM FastAPI Swagger', color: 'text-indigo-500' },
           ].map((svc) => {
             const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
             const url = svc.proto === 'tcp' ? undefined : `${svc.proto}://${host}:${svc.port}${svc.path || ''}`;

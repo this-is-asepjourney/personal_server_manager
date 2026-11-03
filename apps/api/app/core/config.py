@@ -40,10 +40,20 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:3005",
+        "http://localhost:8088",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:3005",
-        "http://localhost:8000"
+        "http://127.0.0.1:8088",
+        "http://localhost:8000",
+        "http://192.168.25.101:3005",
+        "http://192.168.25.101:8000",
+        "http://192.168.25.101:8088",
     ]
+
+    # Personal API Platform (Main API / API Utama) & IoT Dashboard Integration
+    PAP_API_URL: str = os.getenv("PAP_API_URL", "http://192.168.25.101:8000")
+    PAP_API_KEY: str = os.getenv("PAP_API_KEY", "pap_key_psm_control_plane_default_secret_key_2026")
+    IOT_DASHBOARD_URL: str = os.getenv("IOT_DASHBOARD_URL", "http://192.168.25.101:8088")
 
     # Storage & Workspace paths
     STORAGE_BASE_DIR: str = os.getenv("STORAGE_BASE_DIR", "./storage")

@@ -441,3 +441,30 @@ def test_project_postgres_auto_provision(client):
 
 
 
+
+def test_pap_main_api_and_iot_fleet_integration(client):
+    token = get_auth_token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Check PAP Main API hub status from PSM
+    status_res = client.get("/api/v1/pap/status", headers=headers)
+    assert status_res.status_code == 200
+    status_data = status_res.json()
+    assert status_data["connected"] is True
+    assert status_data["main_api"]["name"] == "Personal API Platform"
+    slugs = [p["slug"] for p in status_data["connected_projects"]]
+    assert "personal-server-manager" in slugs
+    assert "iot-dashboard" in slugs
+
+    # 2. Trigger sync from PSM to PAP Main API
+    sync_res = client.post("/api/v1/pap/sync", headers=headers)
+    assert sync_res.status_code == 200
+    assert sync_res.json()["synced"] is True
+    assert sync_res.json()["servers_count"] >= 1
+
+    # 3. Query Heatpress IoT Fleet via PAP Main API
+    fleet_res = client.get("/api/v1/pap/iot/fleet", headers=headers)
+    assert fleet_res.status_code == 200
+    fleet_data = fleet_res.json()
+    assert fleet_data["category"] == "Heatpress"
+    assert fleet_data["summary"]["total_devices"] >= 3

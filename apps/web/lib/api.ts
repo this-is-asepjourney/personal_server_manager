@@ -554,6 +554,23 @@ export const api = {
     return res.ok ? res.json() : null;
   },
 
+  // Personal API Platform (Main API / API Utama) & IoT Fleet Integration
+  async getPapStatus() {
+    const res = await fetchWithAuth('/api/v1/pap/status');
+    return res.ok ? res.json() : null;
+  },
+
+  async syncWithPap() {
+    const res = await fetchWithAuth('/api/v1/pap/sync', { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to sync with Personal API Platform');
+    return res.json();
+  },
+
+  async getPapIotFleet() {
+    const res = await fetchWithAuth('/api/v1/pap/iot/fleet');
+    return res.ok ? res.json() : null;
+  },
+
   // Backup file download
   async downloadBackup(backupId: string, filename: string) {
     const res = await fetchWithAuth(`/api/v1/backups/${backupId}/download`);
