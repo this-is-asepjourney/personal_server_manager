@@ -48,6 +48,10 @@ class Settings(BaseSettings):
         "http://192.168.25.101:3005",
         "http://192.168.25.101:8000",
         "http://192.168.25.101:8088",
+        "http://100.106.63.90:3005",
+        "http://100.106.63.90:8000",
+        "http://100.106.63.90:8001",
+        "http://100.106.63.90:8088",
     ]
 
     # Personal API Platform (Main API / API Utama) & IoT Dashboard Integration

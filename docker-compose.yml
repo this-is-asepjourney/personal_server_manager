@@ -28,13 +28,13 @@ services:
     ports:
       - "${API_PORT:-8001}:8000"
     environment:
-      # Connects to PostgreSQL (100.106.63.90:5432 / psm-postgres) as appuser and auto-creates database 'psm' if missing.
+      # Connects to existing PostgreSQL (192.168.25.101:5432 / 100.106.63.90:5432) as appuser
       - POSTGRES_DB=${POSTGRES_DB:-psm}
       - POSTGRES_USER=${POSTGRES_USER:-appuser}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-admin12345}
-      - POSTGRES_HOST=${POSTGRES_HOST:-100.106.63.90}
+      - POSTGRES_HOST=${POSTGRES_HOST:-192.168.25.101}
       - POSTGRES_PORT=${POSTGRES_PORT:-5432}
-      - DATABASE_URL=${PSM_DATABASE_URL:-postgresql+psycopg2://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-admin12345}@${POSTGRES_HOST:-100.106.63.90}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-psm}}
+      - DATABASE_URL=${PSM_DATABASE_URL:-postgresql+psycopg2://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-admin12345}@${POSTGRES_HOST:-192.168.25.101}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-psm}}
       - STORAGE_BASE_DIR=/opt/psm
       - UPLOAD_DIR=/opt/psm/uploads
       - RELEASE_DIR=/opt/psm/releases
@@ -55,9 +55,6 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
-    depends_on:
-      postgres:
-        condition: service_healthy
     networks:
       - psm-network
 
@@ -94,6 +91,8 @@ services:
     image: postgres:17-alpine
     container_name: psm-postgres
     restart: unless-stopped
+    profiles:
+      - local-db
     env_file:
       - .env.example
     environment:
